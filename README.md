@@ -32,3 +32,5 @@ This will start a job that
 1. Builds a docker image, and puts it at `root/riksdag.image`
 2. Runs the docker image, putting data in `root/riksdag/...`
 3. When the docker image finishes, it creates a symlink `root/riksdag.done -> root/riksdag/`.
+
+It is up to the ingest script to manage reentrancy.
