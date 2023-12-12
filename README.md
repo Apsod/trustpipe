@@ -4,6 +4,7 @@ Luigu/docker workflow to deal with data ingestion.
 
 ```
 # Requirements: docker, luigi, sqlalchemy
+cd /path/to/trustpipe
 python setup.py install
 ```
 
@@ -21,6 +22,7 @@ root=/data/trustpipe # <--- this is the root directory for the storage
 To run an ingestion script, point to the docker url you want to run and 
 ```
 # start the luigi demon
+cd /path/to/trustpipe
 luigid
 
 # Run an ingestion workflow (point to a github docker url)
