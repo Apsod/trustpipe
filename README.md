@@ -24,7 +24,7 @@ To run an ingestion script, point to the docker url you want to run and
 luigid
 
 # Run an ingestion workflow (point to a github docker url)
-luigi IngestTask --name riksdag --path github.com/Apsod/anforanden.git#main:ingest -- module trustpipe.ingest
+luigi IngestTask --name riksdag --path github.com/Apsod/anforanden.git#main:ingest --module trustpipe.ingest
 ```
 
 This will start a job that
