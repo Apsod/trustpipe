@@ -1,12 +1,14 @@
 import logging
 import json
 
-from trustpipe.util import storage
+from trustpipe.util import meta_storage
 
 import docker
 import luigi
 
 logger = logging.getLogger('luigi-interface')
+
+storage = meta_storage()
 
 class CatalogTask(luigi.Task):
     name = luigi.Parameter()
@@ -25,7 +27,7 @@ class CatalogTask(luigi.Task):
         self._client = docker.client.from_env()
 
     def output(self):
-        return storage().get_target(f'{self.name}.img', format=luigi.format.NopFormat())
+        return storage.get_target(f'{self.name}/img', format=luigi.format.NopFormat())
     
     def run(self):
         try:

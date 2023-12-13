@@ -9,3 +9,9 @@ class storage(luigi.Config):
 
     def get_target(self, *path, **kwargs):
         return luigi.LocalTarget(self.get_path(*path), **kwargs)
+
+class data_storage(storage):
+    pass
+
+class meta_storage(storage):
+    pass
