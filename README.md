@@ -1,5 +1,6 @@
 Luigu/docker workflow to deal with data ingestion. 
 
+
 ## Installation
 
 ```
@@ -28,14 +29,15 @@ Ingestion scripts are run via luigi:
 cd /path/to/trustpipe
 luigid
 
-# Run a specific ingestion workflow (point to a github docker url)
-luigi IngestTask --name riksdag --path github.com/Apsod/anforanden.git#main:ingest --module trustpipe.ingest
+# Run a specific ingestion -> process workflow (in this case, the one at github.com/apsod/litbank.git)
+luigi --module trustpipe.tasks ProcessTask --name litb --branch small  --repo apsod/litbank.git 
 ```
 
 This will start a job that
 
-1. Builds a docker image, and puts it at `/data/trustpipe/meta/riksdag/img`
-2. Runs the docker image, putting data in `/data/trustpipe/data/riksdag/...`
-3. When the docker image finishes, it creates a symlink `/data/trustpipe/meta/riksdag/data -> /data/trustpipe/data/riksdag`.
+1. pulls the ingest-(sub)repo, and puts it at `/data/trustpipe/meta/litb/ingest/pull/`
+2. pulls the process-(sub)repo, and puts it at `/data/trustpipe/meta/litb/process/pull/`
+3. Builds and runs the ingest image, putting data in `/data/trustpipe/data/litb/ingest/...`
+4. Builds and runs the process image, putting data in `/data/trustpipe/data/litb/process/...`
 
-It is up to the ingest script to manage reentrancy.
+It is up to the ingest and process scripts to manage reentrancy.
