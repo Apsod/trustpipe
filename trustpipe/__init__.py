@@ -1,2 +1,2 @@
 from .tasks import PullTask, IngestTask, ProcessTask
-from .util import storage
+from .util import catalog
