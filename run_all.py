@@ -1,13 +1,13 @@
 import luigi
-from trustpipe import IngestTask, ProcessTask
+from trustpipe import IngestTask, ProcessTask, DockerTask, PullTask
 
 
 ingests = [
-        dict(name='riksdag', repo='apsod/anforanden.git', subpath='.', branch='small'),
+        dict(name='riksdag', repo='apsod/anforanden.git', branch='main'),
         ]
 
 process = [
-        dict(name='litbank', repo='apsod/litbank.git', branch='small')
+        dict(name='litbank', repo='apsod/litbank.git', branch='main')
         ]
 
 class RunAll(luigi.WrapperTask):
