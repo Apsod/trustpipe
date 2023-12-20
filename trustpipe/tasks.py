@@ -5,6 +5,7 @@ import os
 import pathlib
 import tempfile
 import re
+import shutil
 from contextlib import contextmanager
 from datetime import datetime
 from dataclasses import dataclass
@@ -13,6 +14,7 @@ import luigi
 from luigi.parameter import ParameterVisibility
 import docker
 import git
+
 
 
 from trustpipe.util import catalog
@@ -97,11 +99,11 @@ class PullTask(luigi.Task):
         INFO['start'] = datetime.now().isoformat()
 
         store = self.storage()
-        store.mkdir(parents=True, exist_ok=True)
+        store.parent.mkdir(parents=True, exist_ok=True)
         rng = secrets.token_hex()
         
-        with get_repo(self.git_url(), self.subpath, self.branch, dir=store.parent, name=f'{store.name}-tmp-{rng}') as repo:
-            os.rename(repo.path, str(self.storage()))
+        with get_repo(self.git_url(), self.subpath, self.branch) as repo:
+            shutil.move(repo.path, str(store))
             INFO['SHA'] = repo.sha
         
         INFO['stop'] = datetime.now().isoformat()

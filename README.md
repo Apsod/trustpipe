@@ -14,30 +14,40 @@ python setup.py install
 In `luigi.cfg` you can configure where the images and data is put:
 
 ```
-[data_storage]
-root=/data/trustpipe/data # <- this is the directory where data will end up
+[catalog]
+# Root folder for metadata and luigi targets
+root=/data/trustpipe/catalog
 
-[meta_storage]
-root=/data/trustpipe/meta # <- this is the directory where images and metadata for runs will end up
+# The following *store* paths are where the orchestrator puts data.
+[PullTask]
+# Root folder for pulled (sub)repos
+# Pulltasks puts repos in {PullTask.store}/{repo}/{branch}/{subpath}
+store=/data/trustpipe/repos
+
+[IngestTask]
+# Root folder for ingestion (where to put ingested data)
+# Ingest-dockers puts data in {IngestTask.store}/{name}
+store=/data/trustpipe/data/ingested
+
+[ProcessTask]
+# Root folder for processing (where to put processed data)
+# Process-dockers puts data in {ProcessTask.store}/{name}
+store=/data/trustpipe/data/processed
 ```
 
 ## Trying it out
 
 Ingestion scripts are run via luigi:
 ```
-# start the luigi demon
-cd /path/to/trustpipe
-luigid
-
 # Run a specific ingestion -> process workflow (in this case, the one at github.com/apsod/litbank.git)
 luigi --module trustpipe.tasks ProcessTask --name litb --branch small  --repo apsod/litbank.git 
 ```
 
 This will start a job that
 
-1. pulls the ingest-(sub)repo, and puts it at `/data/trustpipe/meta/litb/ingest/pull/`
-2. pulls the process-(sub)repo, and puts it at `/data/trustpipe/meta/litb/process/pull/`
-3. Builds and runs the ingest image, putting data in `/data/trustpipe/data/litb/ingest/...`
-4. Builds and runs the process image, putting data in `/data/trustpipe/data/litb/process/...`
+1. pulls and saves the ingest-(sub)repo
+2. pulls and saves the process-(sub)repo
+3. Builds and runs the ingest image, with bind-mount `-v {IngestTask.store}/litb:/data')`
+4. Builds and runs the process image, with bind-mounts `-v {IngestTask.store}/litb:/input/ro -v {ProcessTask.store}/litb:/output`
 
 It is up to the ingest and process scripts to manage reentrancy.
