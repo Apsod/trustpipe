@@ -47,7 +47,9 @@ def get_repo(url, subpath, branch, dir=None, name=None):
 # PULLING STUFF FROM GITHUB
 #
 ###
-
+"""
+A luigi task whose job it is to pull (sub)-repos from github.
+"""
 class PullTask(luigi.Task):
     repo = luigi.Parameter()
     subpath = luigi.Parameter(".")

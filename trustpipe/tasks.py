@@ -113,15 +113,28 @@ class DockerTask(luigi.Task):
             log['vbinds'] = vbinds
             logger.info(json.dumps(log))
             #TODO: Add possibility to mount cache volumes? or other kinds of volumes? (Is it needed?)
-            container = self._client.containers.run(
+            logs = self._client.containers.run(
                 img,
                 volumes=vbinds,  # TODO: should we not depend on /data being where the container puts data?
-                detach=True
+                stream=True,
+                stdout=True,
+                stderr=True,
             )
         
-            for item in container.attach(stream=True):
-                self.__logger.info(item.decode('utf-8'))
-        
+            for item in logs:
+                self.__logger.info(item.decode('utf-8').rstrip())
+
+class RawIngestTask(DockerTask):
+    def output(self):
+        return Catalog.get_target('runs', self.name, ingest.json)
+
+    def output_volume(self):
+        return VBind(str(self.storage()), '/data')
+
+    def requires(self):
+        return {
+                'pull': PullTask(self.repo, self.subpath, self.branch, self.prefix)
+                }
 
 class IngestTask(DockerTask):
     def output(self):
@@ -137,13 +150,8 @@ class IngestTask(DockerTask):
                 }
 
 class ProcessTask(DockerTask):
-    source = luigi.Parameter(default=None)
-
     def output(self):
         return CATALOG.get_target('runs', self.name, 'process.json')
-    
-    def input_name(self):
-        return self.source if self.source else self.name
 
     def input_volumes(self):
         input_path = self.input()['ingest'].get_store()
@@ -156,5 +164,5 @@ class ProcessTask(DockerTask):
         subpath = str(pathlib.Path() / self.subpath / 'process')
         return {
                 'pull': PullTask(self.repo, subpath, self.branch, self.prefix),
-                'ingest': IngestTask(self.input_name(), self.repo, self.subpath, self.branch, self.prefix)
+                'ingest': IngestTask(self.name, self.repo, self.subpath, self.branch, self.prefix)
                 }
