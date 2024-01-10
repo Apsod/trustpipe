@@ -3,54 +3,131 @@ import json
 import os
 import pathlib
 import tempfile
-from dataclasses import dataclass
+import shutil
+
+from contextlib import contextmanager
+from dataclasses import dataclass, field, asdict, MISSING
+
+import git
+import docker
+
+from omegaconf import OmegaConf
 
 import luigi
 from luigi.parameter import ParameterVisibility
-import docker
 
-from trustpipe.target import catalog
-from trustpipe.pull import PullTask
+from trustpipe.target import CatalogTarget
+from trustpipe.util import build_image, get_repo, slughash
 
-CATALOG = catalog()
 
 logger = logging.getLogger('luigi-interface')
 
-def build_pulled(loc, name, client, logger):
-    logger.info(f'building image @ {loc}')
-    try:
-        img, logs = client.images.build(path=loc)
-        for log in logs:
-            logger.info(json.dumps(log))
-    except docker.errors.APIError as e:
-        logger.warning('docker API error during build: ' + e.explanation)
-        raise e
-    except docker.errors.BuildError as e:
-        logger.warning('docker build error during build: ' + e.explanation)
-        raise e
-    return img
+###
+# 
+# Specifications
+# 
+###
 
 @dataclass
-class VBind:
-    hostpath: str
-    contpath: str
-    read_only: bool = False
+class RepoSpec:
+    repo: str = MISSING
+    subpath: str = "."
+    branch: str = "main"
+    
+    def to_task(self):
+        return DockerTask(self.repo, self.subpath, self.branch)
 
-    def fmt(self) -> str:
-        parts = [self.hostpath, self.contpath]
-        if self.read_only:
-            parts.append('ro')
-        return ':'.join(parts)
+@dataclass
+class TaskSpec:
+    name: str = MISSING
+    kind: str = MISSING
+    output: str = '/output'
+    persist: bool = True
+    depends_on: dict[str, RepoSpec] = field(default_factory=dict)
+
+    @classmethod
+    def read(cls, path):
+        ret = OmegaConf.to_object(
+                OmegaConf.merge(
+                    OmegaConf.structured(cls), #schema
+                    OmegaConf.load(path), #data
+                )
+            )
+        return ret
 
 ###
 #
-# RUNNING DOCKERS
+# TASKS THAT PULLS REPOS
 #
 ###
+
+class RepoTarget(CatalogTarget):
+    def path(self):
+        return self.get('storage')
+
+    def spec(self):
+        return TaskSpec.read(pathlib.Path() / self.path() / 'spec.yaml')
+
+    def build_image(self, client, logger):
+        return build_image(self.path(), client, logger)
+
+class PullTask(luigi.Task):
+    repo = luigi.Parameter()
+    subpath = luigi.Parameter(".")
+    branch = luigi.Parameter("main")
+
+    prefix = luigi.Parameter(
+            default='git@github.com:', 
+            significant=False, 
+            visibility=ParameterVisibility.PRIVATE)
+
+    store = luigi.Parameter()
+
+    def basename(self, suffix=''):
+        return slughash(self.repo, self.branch, self.subpath) + suffix
+
+    def storage(self):
+        return pathlib.Path() / self.store / self.basename()
+
+    def output(self):
+        return RepoTarget.make(str(pathlib.Path() / 'repos' / self.basename('.json')))
+
+    def git_url(self):
+        assert self.repo.endswith('.git'), 'repo must end with .git'
+        assert not self.subpath.startswith('/'), 'subpaths must be relative'
+        return f'{self.prefix}{self.repo}'
+
+    def run(self):
+        store = self.storage()
+        META = dict(
+                task = self.get_task_family(),
+                args = self.to_str_params(),
+                storage = str(store),
+                )
+        with self.output().catalogize(**META) as log:
+            with get_repo(self.git_url(), self.subpath, self.branch) as repo:
+                log['SHA'] = repo.sha
+                store.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(repo.path, str(store))
+
+###
+#
+# TASKS THAT RUNS SADs
+#
+###
+
+def to_bind(host_path, container_path, read_only=False):
+    parts = [host_path, container_path]
+    if read_only:
+        parts.append('ro')
+    return ':'.join(parts)
+
+class DataTarget(CatalogTarget):
+    prefix = 'runs'
+    def path(self):
+        return self.get('storage')
 
 class DockerTask(luigi.Task):
-    name = luigi.Parameter()
-
     # DOCKER REPO Parameters
     repo = luigi.Parameter()
     subpath = luigi.Parameter(".")
@@ -74,48 +151,45 @@ class DockerTask(luigi.Task):
         self.__logger = logger
         self._client = docker.client.from_env()
 
+    def pull_task(self):
+        return PullTask(self.repo, self.subpath, self.branch, self.prefix)
+
+    def basename(self, suffix=''):
+        return slughash(self.repo, self.branch, self.subpath) + suffix
+
     def storage(self):
-        return pathlib.Path() / self.store / self.name
+        return pathlib.Path() / self.store / self.basename()
 
     def output(self):
-        raise NotImplementedError()
-
-    def requires(self):
-        return {'pull': PullTask(self.repo, self.subpath, self.branch, self.prefix)}
-
-    def repo_location(self):
-        return self.input()['pull'].get_store()
-
-    def get_img(self):
-        return build_pulled(self.repo_location(), self.name, self._client, self.__logger)
-
-    def input_volumes(self) -> [VBind]:
-        return []
-
-    def output_volume(self) -> VBind:
-        raise NotImplementedError()
-
-    def other_volumes(self) -> [VBind]:
-        return []
-
-    def volumes(self):
-        binds = [self.output_volume()]
-        binds += self.input_volumes()
-        binds += self.other_volumes()
-        return binds
+        return DataTarget.make(str(pathlib.Path() / 'runs' / self.basename('.json')))
 
     def run(self):
-        with self.output().catalogize(self) as log:
-            inputs = self.input()
-            img = self.get_img()
-            vbinds = [vbind.fmt() for vbind in self.volumes()]
+        self.__logger.info('pulling repo')
+        repo = yield self.pull_task()
+        spec = repo.spec()
+
+        names = spec.depends_on.keys()
+        trgs = yield [spec.depends_on[name].to_task() for name in names]
+
+        binds = [to_bind(str(self.storage()), spec.output)]
+        binds += [to_bind(trg.path(), f'/{name}', read_only=True) for name, trg in zip(names, trgs)]
+
+        META = dict(
+                task = self.get_task_family(),
+                storage = str(self.storage()),
+                args = self.to_str_params(),
+                **asdict(spec),
+                )
+
+        with self.output().catalogize(**META) as log:
+            img = repo.build_image(self._client, self.__logger)
             log['image'] = img.id
-            log['vbinds'] = vbinds
+            log['binds'] = binds
             logger.info(json.dumps(log))
             #TODO: Add possibility to mount cache volumes? or other kinds of volumes? (Is it needed?)
             logs = self._client.containers.run(
                 img,
-                volumes=vbinds,  # TODO: should we not depend on /data being where the container puts data?
+                volumes=binds,  # TODO: should we not depend on /data being where the container puts data?
                 stream=True,
                 stdout=True,
                 stderr=True,
@@ -124,45 +198,3 @@ class DockerTask(luigi.Task):
             for item in logs:
                 self.__logger.info(item.decode('utf-8').rstrip())
 
-class RawIngestTask(DockerTask):
-    def output(self):
-        return Catalog.get_target('runs', self.name, ingest.json)
-
-    def output_volume(self):
-        return VBind(str(self.storage()), '/data')
-
-    def requires(self):
-        return {
-                'pull': PullTask(self.repo, self.subpath, self.branch, self.prefix)
-                }
-
-class IngestTask(DockerTask):
-    def output(self):
-        return CATALOG.get_target('runs', self.name, 'ingest.json')
-
-    def output_volume(self):
-        return VBind(str(self.storage()), '/data')
-
-    def requires(self):
-        subpath = str(pathlib.Path() / self.subpath / 'ingest')
-        return {
-                'pull': PullTask(self.repo, subpath, self.branch, self.prefix)
-                }
-
-class ProcessTask(DockerTask):
-    def output(self):
-        return CATALOG.get_target('runs', self.name, 'process.json')
-
-    def input_volumes(self):
-        input_path = self.input()['ingest'].get_store()
-        return [VBind(input_path, '/input')]
-
-    def output_volume(self):
-        return VBind(str(self.storage()), '/output')
-
-    def requires(self):
-        subpath = str(pathlib.Path() / self.subpath / 'process')
-        return {
-                'pull': PullTask(self.repo, subpath, self.branch, self.prefix),
-                'ingest': IngestTask(self.name, self.repo, self.subpath, self.branch, self.prefix)
-                }

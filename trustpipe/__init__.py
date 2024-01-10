@@ -1,3 +1,2 @@
-from .tasks import IngestTask, ProcessTask, DockerTask
-from .pull import PullTask
-from .target import catalog
+from .tasks import DockerTask, PullTask
+from .target import CatalogTarget
