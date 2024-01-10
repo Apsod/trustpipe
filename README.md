@@ -21,18 +21,13 @@ root=/data/trustpipe/catalog
 # The following *store* paths are where the orchestrator puts data.
 [PullTask]
 # Root folder for pulled (sub)repos
-# Pulltasks puts repos in {PullTask.store}/{repo}/{branch}/{subpath}
+# Pulltasks puts repos in {PullTask.store}/{taskname}
 store=/data/trustpipe/repos
 
-[IngestTask]
+[DockerTask]
 # Root folder for ingestion (where to put ingested data)
-# Ingest-dockers puts data in {IngestTask.store}/{name}
-store=/data/trustpipe/data/ingested
-
-[ProcessTask]
-# Root folder for processing (where to put processed data)
-# Process-dockers puts data in {ProcessTask.store}/{name}
-store=/data/trustpipe/data/processed
+# Docker tasks puts data in {DockerTask.store}/{taskname}
+store=/data/trustpipe/data
 ```
 
 ## Trying it out
@@ -40,14 +35,15 @@ store=/data/trustpipe/data/processed
 Ingestion scripts are run via luigi:
 ```
 # Run a specific ingestion -> process workflow (in this case, the one at github.com/apsod/litbank.git)
-luigi --module trustpipe.tasks ProcessTask --name litb --branch small  --repo apsod/litbank.git 
+luigi --module trustpipe.tasks DockerTask --repo apsod/litbank.git  --branch small --subpath process
 ```
 
 This will start a job that
 
-1. pulls and saves the ingest-(sub)repo
-2. pulls and saves the process-(sub)repo
-3. Builds and runs the ingest image, with bind-mount `-v {IngestTask.store}/litb:/data')`
-4. Builds and runs the process image, with bind-mounts `-v {IngestTask.store}/litb:/input/ro -v {ProcessTask.store}/litb:/output`
+1. Pulls the process-(sub)repo (putting repos in `{PullTask.store} / {task-slug_t45kh45h}`)
+2. Identifies that this depends on a separate ingest-(sub)repo
+3. Pulls the ingest-(sub)repo
+4. Runs the ingest image (putting data in `{DockerTask.store} / {task-slug_t45kh45h}`)
+5. Runs the process image
 
 It is up to the ingest and process scripts to manage reentrancy.
