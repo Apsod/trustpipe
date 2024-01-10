@@ -15,6 +15,7 @@ from omegaconf import OmegaConf
 
 import luigi
 from luigi.parameter import ParameterVisibility
+from luigi.util import requires
 
 from trustpipe.target import CatalogTarget
 from trustpipe.util import build_image, get_repo, slughash
@@ -71,6 +72,9 @@ class RepoTarget(CatalogTarget):
     def build_image(self, client, logger):
         return build_image(self.path(), client, logger)
 
+class repostore(luigi.Config):
+    store = luigi.Parameter()
+
 class PullTask(luigi.Task):
     repo = luigi.Parameter()
     subpath = luigi.Parameter(".")
@@ -81,13 +85,11 @@ class PullTask(luigi.Task):
             significant=False, 
             visibility=ParameterVisibility.PRIVATE)
 
-    store = luigi.Parameter()
-
     def basename(self, suffix=''):
         return slughash(self.repo, self.branch, self.subpath) + suffix
 
     def storage(self):
-        return pathlib.Path() / self.store / self.basename()
+        return pathlib.Path() / repostore().store / self.basename()
 
     def output(self):
         return RepoTarget.make(str(pathlib.Path() / 'repos' / self.basename('.json')))
@@ -98,17 +100,17 @@ class PullTask(luigi.Task):
         return f'{self.prefix}{self.repo}'
 
     def run(self):
-        store = self.storage()
+        storage = self.storage()
         META = dict(
                 task = self.get_task_family(),
                 args = self.to_str_params(),
-                storage = str(store),
+                storage = str(storage),
                 )
         with self.output().catalogize(**META) as log:
             with get_repo(self.git_url(), self.subpath, self.branch) as repo:
                 log['SHA'] = repo.sha
-                store.parent.mkdir(parents=True, exist_ok=True)
-                shutil.move(repo.path, str(store))
+                storage.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(repo.path, str(storage))
 
 ###
 #
@@ -127,19 +129,11 @@ class DataTarget(CatalogTarget):
     def path(self):
         return self.get('storage')
 
-class DockerTask(luigi.Task):
-    # DOCKER REPO Parameters
-    repo = luigi.Parameter()
-    subpath = luigi.Parameter(".")
-    branch = luigi.Parameter("main")
-
-    prefix = luigi.Parameter(
-            default='git@github.com:', 
-            significant=False, 
-            visibility=ParameterVisibility.PRIVATE)
-
+class datastore(luigi.Config):
     store = luigi.Parameter()
 
+@requires(PullTask)
+class DockerTask(luigi.Task):
     def __init__(self, *args, **kwargs):
         '''
         When a new instance of the IngestTask class gets created:
@@ -151,32 +145,31 @@ class DockerTask(luigi.Task):
         self.__logger = logger
         self._client = docker.client.from_env()
 
-    def pull_task(self):
-        return PullTask(self.repo, self.subpath, self.branch, self.prefix)
-
     def basename(self, suffix=''):
         return slughash(self.repo, self.branch, self.subpath) + suffix
 
     def storage(self):
-        return pathlib.Path() / self.store / self.basename()
+        return pathlib.Path() / datastore().store / self.basename()
 
     def output(self):
         return DataTarget.make(str(pathlib.Path() / 'runs' / self.basename('.json')))
 
     def run(self):
         self.__logger.info('pulling repo')
-        repo = yield self.pull_task()
+        repo = self.input() #yield PullTask(self.repo, self.subpath, self.branch, self.prefix)
         spec = repo.spec()
 
         names = spec.depends_on.keys()
         trgs = yield [spec.depends_on[name].to_task() for name in names]
 
-        binds = [to_bind(str(self.storage()), spec.output)]
+        storage = str(self.storage())
+
+        binds = [to_bind(storage, spec.output)]
         binds += [to_bind(trg.path(), f'/{name}', read_only=True) for name, trg in zip(names, trgs)]
 
         META = dict(
                 task = self.get_task_family(),
-                storage = str(self.storage()),
+                storage = storage,
                 args = self.to_str_params(),
                 **asdict(spec),
                 )
@@ -198,3 +191,33 @@ class DockerTask(luigi.Task):
             for item in logs:
                 self.__logger.info(item.decode('utf-8').rstrip())
 
+###
+#
+# TASKS THAT WRAPS MULTIPLE REPOS
+#
+###
+
+@requires(PullTask)
+class WrapperTask(luigi.WrapperTask):
+    def __init__(self, *args, **kwargs):
+        '''
+        When a new instance of the IngestTask class gets created:
+        - call the parent class __init__ method
+        - start the logger
+        - init an instance of the docker client
+        '''
+        super().__init__(*args, **kwargs)
+        self.__logger = logger
+        self._client = docker.client.from_env()
+
+    def run(self):
+        self.__logger.info('pulling repo')
+        repo = self.input()
+        spec = repo.spec()
+
+        names = spec.depends_on.keys()
+        self.__logger.info('running wrapped')
+        trgs = yield [spec.depends_on[name].to_task() for name in names]
+
+    def complete(self):
+        return False

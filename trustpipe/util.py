@@ -57,8 +57,9 @@ def clone_subpath(url, subpath, dst, branch=None):
             url, 
             multi_options=OPTIONS,
             to_path=dst)
-    repo.git.sparse_checkout('init')
-    repo.git.sparse_checkout(['set', '--no-cone', subpath])
+    if subpath != '.':
+        repo.git.sparse_checkout('init')
+        repo.git.sparse_checkout(['set', '--no-cone', subpath])
     repo.git.checkout()
     return repo.rev_parse('HEAD').hexsha
 
