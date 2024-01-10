@@ -2,6 +2,7 @@ from contextlib import contextmanager
 from types import SimpleNamespace
 from datetime import datetime
 from dataclasses import dataclass
+import pathlib
 import json
 import os
 import logging
@@ -23,17 +24,6 @@ class catalog(luigi.Config):
         return CatalogTarget(luigi.LocalTarget(self.get_path(*path), **kwargs))
 
 
-def mk_taskinfo(task):
-    item = {}
-    item['task'] = task.get_task_family()
-    item['args'] = task.to_str_params()
-    item['storage'] = str(task.storage())
-    if isinstance(task.input(), dict):
-        item['catalog_deps'] = {k: v.read() for k, v in task.input().items() if isinstance(v, CatalogTarget)}
-    else:
-        item['catalog_deps'] = {}
-    return item
-
 """
 This is a convenience wrapper around a filesystem target (fs_target)
 it shares the same existance criteria as the fs_target, but adds
@@ -47,28 +37,37 @@ with ct.catalogize(task) as log:
     # On entering, task information, time stamps 
     # and other stuff is written to the log-dictionary.
     
-    ... dostuff ...
+    do_stuff()
 
     # We can use the log-dictionary inside the context
     log['note'] = 'this will be logged'
 
-# On exiting the with-statement the log object is written to the fs_target
-assert ct.exists()
+do_stuff()
 ```
+
+On exiting the with-statement the log object is written to the fs_target
+(And consequently, the target will *exist* after exiting the with-statement)
 """
 class CatalogTarget(luigi.Target):
     def __init__(self, fs_target):
         self.fs_target = fs_target
 
+    @classmethod
+    def make(cls, path, **kwargs):
+        fspath = str(pathlib.Path() / catalog().root / path)
+        target = luigi.LocalTarget(fspath, **kwargs)
+        return cls(target)
+
     @contextmanager
-    def catalogize(self, task):
+    def catalogize(self, **kwargs):
         assert not self.exists(), "Can't catalogize if already exists!"
-        item = mk_taskinfo(task)
+        item = {}
+        item.update(kwargs)
         item['start'] = datetime.now().isoformat()
         item['inner'] = {}
         try:
             yield item['inner']
-        except e:
+        except Exception as e:
             item['stop'] = datetime.now().isoformat()
             item['done'] = False
             item_str = json.dumps(item)
@@ -80,15 +79,16 @@ class CatalogTarget(luigi.Target):
             item_str = json.dumps(item)
             with self.fs_target.open('w') as h:
                 h.write(item_str)
-
+    
     def read(self):
         assert self.exists(), "Can't read if not already catalogized"
         with self.fs_target.open('r') as h:
             item = json.load(h)
         return item
 
-    def get_store(self):
-        return self.read()['storage']
+    def get(self, index, default=None):
+        return self.read().get(index, default)
 
     def exists(self):
         return self.fs_target.exists()
+

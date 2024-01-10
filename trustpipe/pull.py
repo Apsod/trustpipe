@@ -11,6 +11,7 @@ from luigi.parameter import ParameterVisibility
 import git
 
 from trustpipe.target import catalog
+from trustpipe.util import slughash
 
 CATALOG = catalog()
 
@@ -62,11 +63,15 @@ class PullTask(luigi.Task):
 
     store = luigi.Parameter()
 
+    def basename(self):
+        return slughash(self.repo, self.branch, self.subpath)
+
     def storage(self):
-        return pathlib.Path() / self.store / self.repo / self.branch / self.subpath
+        return pathlib.Path() / self.store / self.basename()
 
     def output(self):
-        return CATALOG.get_target('pulled', self.repo, self.branch, self.subpath + '.json')
+        path = str(pathlib.Path() / 'repos' / self.basename())
+        return catalog().get_target(path + '.json')
 
     def git_url(self):
         assert self.repo.endswith('.git'), 'repo must end with .git'
@@ -74,10 +79,14 @@ class PullTask(luigi.Task):
         return f'{self.prefix}{self.repo}'
 
     def run(self):
-        with self.output().catalogize(self) as log:
-            store = self.storage()
-            
+        store = self.storage()
+        META = dict(
+                task = self.get_task_family(),
+                args = self.to_str_params(),
+                storage = str(store),
+                )
+        with self.output().catalogize(**META) as log:
             with get_repo(self.git_url(), self.subpath, self.branch) as repo:
+                log['SHA'] = repo.sha
                 store.parent.mkdir(parents=True, exist_ok=True)
                 shutil.move(repo.path, str(store))
-                log['SHA'] = repo.sha
