@@ -125,7 +125,6 @@ def to_bind(host_path, container_path, read_only=False):
     return ':'.join(parts)
 
 class DataTarget(CatalogTarget):
-    prefix = 'runs'
     def path(self):
         return self.get('storage')
 
