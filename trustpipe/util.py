@@ -25,12 +25,6 @@ def hashdigest(*args, **kwargs):
             bs
             ).hexdigest()
 
-def slughash(*args, **kwargs):
-    s = slug(*args, **kwargs)
-    h = hashdigest(*args, **kwargs)
-
-    return f'{s}_{h}'
-
 """
 utilities for pulling, building, and handling git repos
 """

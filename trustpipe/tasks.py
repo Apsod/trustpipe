@@ -18,7 +18,7 @@ from luigi.parameter import ParameterVisibility
 from luigi.util import requires
 
 from trustpipe.target import CatalogTarget
-from trustpipe.util import build_image, get_repo, slughash
+from trustpipe.util import build_image, get_repo, slug, hashdigest
 
 
 logger = logging.getLogger('luigi-interface')
@@ -92,8 +92,15 @@ class PullTask(luigi.Task):
             significant=False, 
             visibility=ParameterVisibility.PRIVATE)
 
+    
+    def slug(self):
+        return slug(self.repo, self.branch, self.subpath)
+
+    def hashdigest(self):
+        return hashdigest(self.repo, self.branch, self.subpath)
+
     def basename(self, suffix=''):
-        return slughash(self.repo, self.branch, self.subpath) + suffix
+        return f'{self.slug()}_{self.hashdigest()}{suffix}'
 
     def storage(self):
         return pathlib.Path() / repostore().store / self.basename()
@@ -154,9 +161,15 @@ class DockerTask(luigi.Task):
         super().__init__(*args, **kwargs)
         self.__logger = logger
         self._client = docker.client.from_env()
+    
+    def slug(self):
+        return slug(self.repo, self.branch, self.subpath)
+
+    def hashdigest(self):
+        return hashdigest(self.repo, self.branch, self.subpath)
 
     def basename(self, suffix=''):
-        return slughash(self.repo, self.branch, self.subpath) + suffix
+        return f'{self.slug()}_{self.hashdigest()}{suffix}'
 
     def storage(self):
         return pathlib.Path() / datastore().store / self.basename()
@@ -186,12 +199,15 @@ class DockerTask(luigi.Task):
 
         with self.output().catalogize(**META) as log:
             img = repo.build_image(self._client, self.__logger)
+            logger.info('removing repo')
+            repo.fs_target.remove()
             log['image'] = img.id
             log['binds'] = binds
             logger.info(json.dumps(log))
             #TODO: Add possibility to mount cache volumes? or other kinds of volumes? (Is it needed?)
             logs = self._client.containers.run(
                 img,
+                name=self.slug(),
                 volumes=binds,  # TODO: should we not depend on /data being where the container puts data?
                 stream=True,
                 stdout=True,
