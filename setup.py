@@ -7,7 +7,10 @@ setup(
     packages=find_packages(),    
     install_requires=[
         'sqlalchemy==1.4.46',
-        'luigi>=3.4',
-        'docker>=6.1',
+        'luigi==3.4',
+        'docker==6.1',
+        'gitpython==3.1',
+        'omegaconf==2.3.0',
+        'python-slugify==8.0.1',
         ]
 )

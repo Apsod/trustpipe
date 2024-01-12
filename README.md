@@ -3,10 +3,12 @@ Luigu/docker workflow to deal with data ingestion.
 
 ## Installation
 
+To install, 
+
 ```
-# Requirements: docker, luigi, sqlalchemy
-cd /path/to/trustpipe
-python setup.py install
+git clone git@github.com:apsod/trustpipe.git
+cd trustpipe
+pip install -e .
 ```
 
 ## Configuration
@@ -20,15 +22,15 @@ root=/data/trustpipe/catalog
 
 # The following *store* paths are where the orchestrator puts data.
 [repostore]
-# Root folder for pulled (sub)repos
-# Pulltasks puts repos in {PullTask.store}/{taskname}
+# Root folder where (sub)repos are put
 store=/data/trustpipe/repos
 
 [datastore]
-# Root folder for ingestion (where to put ingested data)
-# Docker tasks puts data in {DockerTask.store}/{taskname}
+# Root folder where data is put
 store=/data/trustpipe/data
 ```
+
+Luigi looks for cfg files at `/etc/luigi/luigi.cfg`, put the config there for global.
 
 ## Trying it out
 
@@ -40,10 +42,10 @@ luigi --module trustpipe.tasks DockerTask --repo apsod/litbank.git  --branch sma
 
 This will start a job that
 
-1. Pulls the process-(sub)repo (putting repos in `{PullTask.store} / {task-slug_t45kh45h}`)
+1. Pulls the process-subrepo 
 2. Identifies that this depends on a separate ingest-(sub)repo
-3. Pulls the ingest-(sub)repo
-4. Runs the ingest image (putting data in `{DockerTask.store} / {task-slug_t45kh45h}`)
+3. Pulls the ingest-subrepo
+4. Runs the ingest image
 5. Runs the process image
 
 It is up to the ingest and process scripts to manage reentrancy.

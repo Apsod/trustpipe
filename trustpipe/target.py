@@ -16,12 +16,6 @@ logger = logging.getLogger('luigi-interface')
 # supported by an underlying LocalTarget @ catalog.root / *path
 class catalog(luigi.Config):
     root = luigi.Parameter()
-    
-    def get_path(self, *path):
-        return os.path.join(self.root, *path)
-
-    def get_target(self, *path, **kwargs):
-        return CatalogTarget(luigi.LocalTarget(self.get_path(*path), **kwargs))
 
 
 """
@@ -63,18 +57,18 @@ class CatalogTarget(luigi.Target):
         assert not self.exists(), "Can't catalogize if already exists!"
         item = {}
         item.update(kwargs)
-        item['start'] = datetime.now().isoformat()
-        item['inner'] = {}
+        item['duration'] = {}
+        item['duration']['start'] = datetime.now().isoformat()
         try:
-            yield item['inner']
+            yield item
         except Exception as e:
-            item['stop'] = datetime.now().isoformat()
+            item['duration']['stop'] = datetime.now().isoformat()
             item['done'] = False
             item_str = json.dumps(item)
             logger.error(item_str)
             raise e
         else:
-            item['stop'] = datetime.now().isoformat()
+            item['duration']['stop'] = datetime.now().isoformat()
             item['done'] = True
             item_str = json.dumps(item)
             with self.fs_target.open('w') as h:

@@ -72,6 +72,9 @@ class RepoTarget(CatalogTarget):
     def build_image(self, client, logger):
         return build_image(self.path(), client, logger)
 
+    def dependencies(self):
+        return self.spec().depends_on
+
 class repostore(luigi.Config):
     store = luigi.Parameter()
 
@@ -155,7 +158,7 @@ class DockerTask(luigi.Task):
 
     def run(self):
         self.__logger.info('pulling repo')
-        repo = self.input() #yield PullTask(self.repo, self.subpath, self.branch, self.prefix)
+        repo = self.input()
         spec = repo.spec()
 
         names = spec.depends_on.keys()
