@@ -47,8 +47,12 @@ class CatalogTarget(luigi.Target):
         self.fs_target = fs_target
 
     @classmethod
+    def catalog_root(cls):
+        return pathlib.Path() / catalog().root
+
+    @classmethod
     def make(cls, path, **kwargs):
-        fspath = str(pathlib.Path() / catalog().root / path)
+        fspath = str(cls.catalog_root() / path)
         target = luigi.LocalTarget(fspath, **kwargs)
         return cls(target)
 

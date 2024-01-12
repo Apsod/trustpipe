@@ -63,6 +63,10 @@ class TaskSpec:
 ###
 
 class RepoTarget(CatalogTarget):
+    @classmethod
+    def catalog_root(cls):
+        return super().catalog_root() / 'repos'
+
     def path(self):
         return self.get('storage')
 
@@ -95,7 +99,7 @@ class PullTask(luigi.Task):
         return pathlib.Path() / repostore().store / self.basename()
 
     def output(self):
-        return RepoTarget.make(str(pathlib.Path() / 'repos' / self.basename('.json')))
+        return RepoTarget.make(self.basename('.json'))
 
     def git_url(self):
         assert self.repo.endswith('.git'), 'repo must end with .git'
@@ -128,6 +132,10 @@ def to_bind(host_path, container_path, read_only=False):
     return ':'.join(parts)
 
 class DataTarget(CatalogTarget):
+    @classmethod
+    def catalog_root(cls):
+        return super().catalog_root() / 'data'
+
     def path(self):
         return self.get('storage')
 
@@ -154,7 +162,7 @@ class DockerTask(luigi.Task):
         return pathlib.Path() / datastore().store / self.basename()
 
     def output(self):
-        return DataTarget.make(str(pathlib.Path() / 'runs' / self.basename('.json')))
+        return DataTarget.make(self.basename('.json'))
 
     def run(self):
         self.__logger.info('pulling repo')
@@ -173,7 +181,7 @@ class DockerTask(luigi.Task):
                 task = self.get_task_family(),
                 storage = storage,
                 args = self.to_str_params(),
-                **asdict(spec),
+                spec = asdict(spec),
                 )
 
         with self.output().catalogize(**META) as log:
