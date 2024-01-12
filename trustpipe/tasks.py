@@ -42,6 +42,14 @@ class RepoSpec:
 class TaskSpec:
     name: str = MISSING
     kind: str = MISSING
+    version: str = ""
+    timestamp: str = ""
+    modalities: str = ""
+    data_explanation: str = ""
+    data_source: str = ""
+    copyright: str = ""
+    author_name: str = ""
+    author_email: str = ""
     output: str = '/output'
     persist: bool = True
     depends_on: dict[str, RepoSpec] = field(default_factory=dict)
@@ -102,8 +110,6 @@ class PullTask(luigi.Task):
     def basename(self, suffix=''):
         return f'{self.slug()}_{self.hashdigest()}{suffix}'
 
-    def storage(self):
-        return pathlib.Path() / repostore().store / self.basename()
 
     def output(self):
         return RepoTarget.make(self.basename('.json'))
@@ -114,7 +120,7 @@ class PullTask(luigi.Task):
         return f'{self.prefix}{self.repo}'
 
     def run(self):
-        storage = self.storage()
+        storage = pathlib.Path() / repostore().store / self.basename()
         META = dict(
                 task = self.get_task_family(),
                 args = self.to_str_params(),
@@ -149,6 +155,7 @@ class DataTarget(CatalogTarget):
 class datastore(luigi.Config):
     store = luigi.Parameter()
 
+
 @requires(PullTask)
 class DockerTask(luigi.Task):
     def __init__(self, *args, **kwargs):
@@ -171,8 +178,8 @@ class DockerTask(luigi.Task):
     def basename(self, suffix=''):
         return f'{self.slug()}_{self.hashdigest()}{suffix}'
 
-    def storage(self):
-        return pathlib.Path() / datastore().store / self.basename()
+    #def storage(self):
+    #    return pathlib.Path() / datastore().store / self.basename()
 
     def output(self):
         return DataTarget.make(self.basename('.json'))
@@ -185,7 +192,7 @@ class DockerTask(luigi.Task):
         names = spec.depends_on.keys()
         trgs = yield [spec.depends_on[name].to_task() for name in names]
 
-        storage = str(self.storage())
+        storage = str(pathlib.Path() / datastore().store / spec.name / spec.kind)
 
         binds = [to_bind(storage, spec.output)]
         binds += [to_bind(trg.path(), f'/{name}', read_only=True) for name, trg in zip(names, trgs)]
@@ -200,7 +207,6 @@ class DockerTask(luigi.Task):
         with self.output().catalogize(**META) as log:
             img = repo.build_image(self._client, self.__logger)
             logger.info('removing repo')
-            repo.fs_target.remove()
             log['image'] = img.id
             log['binds'] = binds
             logger.info(json.dumps(log))
@@ -208,6 +214,7 @@ class DockerTask(luigi.Task):
             logs = self._client.containers.run(
                 img,
                 name=self.slug(),
+                auto_remove=True,
                 volumes=binds,  # TODO: should we not depend on /data being where the container puts data?
                 stream=True,
                 stdout=True,
@@ -216,6 +223,18 @@ class DockerTask(luigi.Task):
         
             for item in logs:
                 self.__logger.info(item.decode('utf-8').rstrip())
+
+@DockerTask.event_handler(luigi.Event.SUCCESS)
+def on_run_success(task):
+    logger.info('removing repo')
+    shutil.rmtree(task.input().path())
+    task.input().fs_target.remove()
+
+@DockerTask.event_handler(luigi.Event.FAILURE)
+def on_run_failure(task, exception):
+    logger.info('removing repo')
+    shutil.rmtree(task.input().path())
+    task.input().fs_target.remove()
 
 ###
 #
