@@ -1,90 +1,85 @@
+"""Command Line Interface of trustpipe"""
+
 import os
-import pathlib
-import luigi
-import argparse
-import json
-import re
-import shutil
+import click
 import jq
-from dataclasses import dataclass
-from collections import defaultdict, namedtuple
-from trustpipe.target import CatalogTarget, catalog
-from trustpipe.tasks import DataTarget, RepoTarget
+from typing import Optional, List
 
-class Cmd(object):
-    cmd = None
-
-    def __init__(self, args):
-        self.__dict__.update(args.__dict__)
-
-    @staticmethod
-    def add_parsers(sp, *classes):
-        for cls in classes:
-            cls.__add_one(sp)
-
-    @classmethod
-    def __add_one(cls, sp):
-        parser = sp.add_parser(cls.cmd)
-        cls.mk_parser(parser)
-        parser.set_defaults(__run=cls._run)
-
-    @classmethod
-    def mk_parser(cls, parser):
-        pass
-
-    @classmethod
-    def _run(cls, args):
-        obj = cls(args)
-        obj.run()
-
-    def run(self):
-        pass
+from trustpipe.tasks import DataTarget
 
 
-def scan_data():
-    root = DataTarget.catalog_root()
-    yield from os.scandir(root)
+#################################
+# HELPERS
+#################################
+class JsonFilter(object):
+    """class that composes and applies multiple filters to json documents"""
 
-class ListCmd(Cmd):
-    cmd = 'list'
-    
-    @classmethod
-    def mk_parser(cls, parser):
-        parser.add_argument('--filter', type=str)
-        parser.add_argument('--parents', action='store_true')
-        parser.add_argument('--children', action='store_true')
+    def __init__(self, jq_filters: List[str]) -> None:
+        """
+        Args:
+            jq_filters: e.g. ['.spec.kind = "process"', '.spec.name = "litteraturbanken"']
+        """
+        self.filters = [jq.compile(jq_filter) for jq_filter in jq_filters]
 
-    @property
-    def mk_graph(self):
-        return self.parents or self.children
+    def apply(self, doc: str) -> bool:
+        """
+        Args:
+            doc: e.g. {"task": "DockerTask", "spec": {"name": "litteraturbanken", "kind": "process", ..}, ..}
 
-    def _filter(self, doc):
-        if self.filter:
-            if not hasattr(self, '__filter'):
-                self.__filter = jq.compile(self.filter)
-            res = self.__filter.input_text(doc).all()
+        Returns:
+            keep_doc: whether to keep the input doc or not.
+        """
+        for _filter in self.filters:
+            res = _filter.input_text(doc).all()
             assert [type(r) for r in res] == [bool], "jq script must have single bool result per record"
-            return res[0]
-        else:
-            return True
-
-    def run(self):
-        entries = os.scandir(DataTarget.catalog_root())
-        for de in entries:
-            doc = open(de).read()
-            if self._filter(doc):
-                print(de.path)
+            if res[0] is False:
+                return False
+        return True
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    subparsers = parser.add_subparsers()
+#################################
+# CLI
+#################################
+@click.group()
+def main() -> None:
+    """CLI FOR TRUSTPIPE"""
+    pass
 
-    Cmd.add_parsers(subparsers, ListCmd)
-    
-    args = parser.parse_args()
-    args.__run(args)
 
-if __name__ == '__main__':
-    main()
+@main.command(name="list")
+@click.option(
+    "--jq_filter",
+    type=str,
+    required=False,
+    help="filter json files using jq filter, e.g. \'.spec.kind = \"process\"\'",
+)
+@click.option(
+    "--kind",
+    type=str,
+    required=False,
+    help="filter json files by kind, e.g. process",
+)
+@click.option(
+    "--name",
+    type=str,
+    required=False,
+    help="filter json files by name, e.g. litteraturbanken",
+)
+def entry_point_list(jq_filter: Optional[str], kind: Optional[str], name: Optional[str]) -> None:
+    """LIST COMPLETED TASKS. USE OPTIONS BELOW TO FILTER JSON FILES."""
+    # parse input arguments and create JsonFilter instance
+    jq_filters = []
+    if jq_filter is not None:
+        jq_filters.append(jq_filter)
+    if kind is not None:
+        jq_filters.append(f".spec.kind == \"{kind}\"")
+    if name is not None:
+        jq_filters.append(f".spec.name == \"{name}\"")
+    json_filter = JsonFilter(jq_filters) if len(jq_filters) else None
 
+    # apply JsonFilter instance and print list of docs
+    entries = os.scandir(DataTarget.catalog_root())
+    for de in entries:
+        doc = open(de).read()
+        if json_filter is None or json_filter.apply(doc):
+            print(de.path)
