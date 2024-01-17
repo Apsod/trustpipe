@@ -42,6 +42,8 @@ To start the central scheduler, run the luigi demon (in a screen or tmux): `luig
 
 The central scheduler makes sure that we don't start several competing runs of the same task. If you want to try it without the central scheduler, simply add `--local-scheduler` to the luigi calls.
 
+**NOTE**: The paths in the configuration need to be absolute. 
+
 ## What it does
 
 Trustpipe manages task orchestration and configuration. It helps with running tasks that downloads, processes or transforms data and makes sure that they are run in the correct order, logs how/when they are ran, and manages docker volumes (containers can be filesystem agnostic).
