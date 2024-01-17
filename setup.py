@@ -4,6 +4,11 @@ setup(
     name='trustpipe',
     version='0.1.0',
     description='Task orchestratition for data collection and curation',
+    entry_points={
+        'console_scripts': [
+            'trustpipe = trustpipe.cli:main',
+            ],
+        },
     packages=find_packages(),    
     install_requires=[
         'sqlalchemy==1.4.46',

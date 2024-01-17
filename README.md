@@ -11,6 +11,8 @@ cd trustpipe
 pip install -e .
 ```
 
+Trustpipe uses ssh to clone repos, if you get an error like `permission denied (publickey)`, you have not configured git/github to use ssh, and it will (currently) not work.
+
 ## Configuration
 
 In `luigi.cfg` you can configure where the images and data is put:
@@ -22,30 +24,154 @@ root=/data/trustpipe/catalog
 
 # The following *store* paths are where the orchestrator puts data.
 [repostore]
-# Root folder where (sub)repos are put
-store=/data/trustpipe/repos
+# Folder for repos
+# task.repo, task.subpath, task.branch
+# task.slug, task.hash, task.basename (task.slug_task.hash)
+store=/data/trustpipe/repos/{task.basename}
 
 [datastore]
-# Root folder where data is put
-store=/data/trustpipe/data
+# Folder for ingestion
+# task.repo, task.subpath, task.branch
+# task.slug, task.hash, task.basename
+# spec.name, spec.kind, spec. ...
+store=/data/trustpipe/data/{task.basename}
 ```
 
-Luigi looks for cfg files at `/etc/luigi/luigi.cfg`, put the config there for global.
+When you have configured trustpipe to your liking, put the config file in `/etc/luigi/luigi.cfg`, or point to it using the environment variable `LUIGI_CONFIG_PATH`. 
+To start the central scheduler, run the luigi demon (in a screen or tmux): `luigid`
 
-## Trying it out
+The central scheduler makes sure that we don't start several competing runs of the same task. If you want to try it without the central scheduler, simply add `--local-scheduler` to the luigi calls.
 
-Ingestion scripts are run via luigi:
+## What it does
+
+Trustpipe manages task orchestration and configuration. It helps with running tasks that downloads, processes or transforms data and makes sure that they are run in the correct order, logs how/when they are ran, and manages docker volumes (containers can be filesystem agnostic).
+It assumes that **tasks** are containerized, software defined assets. These **tasks** need two things:
+
+- A dockerfile and build context.
+- A specification with **task dependencies** and metadata.
+
+All of this is assumed to reside on a subpath of a git repo.
+For example, the repo https://github.com/Apsod/litbank contains two tasks: an `ingest` task and a `process` task, and looks like this: 
+
 ```
-# Run a specific ingestion -> process workflow (in this case, the one at github.com/apsod/litbank.git)
+├── ingest
+│   ├── Dockerfile
+│   ├── mklist.sh
+│   ├── sources.txt
+│   └── spec.yaml
+└── process
+    ├── Dockerfile
+    ├── process.sh
+    └── spec.yaml
+```
+
+The ingest task is defined by the Dockerfile, and looks like this: 
+
+```
+FROM alpine:3.18.5
+RUN apk add --no-cache wget
+COPY sources.txt .
+VOLUME /data
+ENTRYPOINT [\
+    "wget",\
+    "--continue",\
+    "--no-verbose",\
+    "--force-directories",\
+    "--no-host-directories",\
+    "--cut-dirs=2",\
+    "--directory-prefix=/data",\
+    "--input-file=sources.txt"]
+```
+
+i.e. it wgets a bunch of urls that can be found in sources.txt, and puts them in `/data`.
+
+The specification specifies the name and kind of the task (metadata) and specifies where **in the container** the output data is stored (defaults to `/output`).
+
+```
+name: litteraturbanken
+kind: ingest
+output: /data
+```
+
+When we run
+```
+luigi --module trustpipe.tasks DockerTask --repo apsod/litbank.git  --branch small --subpath ingest
+```
+Trustpipe clones the specified subpath of the repo (and branch/tag), builds the docker image, and runs it, mounting the folder specified by `datastore` to the tasks output.
+
+### Dependencies
+
+The process task is a bit more interesting. The Dockerfile looks like this: 
+
+```
+FROM alpine:3.18.5
+RUN apk add --no-cache pandoc
+RUN apk add --no-cache jq
+RUN apk add --no-cache parallel
+VOLUME /input
+VOLUME /output
+COPY process.sh .
+ENTRYPOINT ["/process.sh"]
+```
+
+where `process.sh` essentially uses pandoc to convert from epub to plain text. However, the specification looks like this: 
+
+```
+name: litteraturbanken
+kind: process
+depends_on:
+  input: 
+    repo: apsod/litbank.git
+    subpath: ingest
+    branch: small
+```
+
+Here, we specify that this task depends on another task (specified by a repo, subpath, and branch), namely the above ingest task. We also specify that the local **name** of this task is `input`.
+
+When we run
+```
 luigi --module trustpipe.tasks DockerTask --repo apsod/litbank.git  --branch small --subpath process
 ```
 
-This will start a job that
+Trustpipe does the following:
 
 1. Pulls the process-subrepo 
-2. Identifies that this depends on a separate ingest-(sub)repo
+2. Identifies that this depends on a separate ingest-subrepo
 3. Pulls the ingest-subrepo
-4. Runs the ingest image
-5. Runs the process image
+4. Builds an runs the ingest task. Mounting the host path specified by `datastore` to the internal container path specified by the task specification (default: `/output`)
+5. When/if the ingest task has finished (without errors), it runs the process task. Mounting the host path of the ingest task output to `/input` (read-only), and the host path specified by `datastore` to `/output`
 
-It is up to the ingest and process scripts to manage reentrancy.
+Depdencies that have already been run are not rerun, and a task can have several dependencies: 
+
+For example, a task with the following specification:
+
+```
+name: test
+kind: process
+depends_on:
+  dataA: 
+    repo: some_repo_A
+    subpath: task_A
+  dataB:
+    repo: some_repo_B
+    subpath: task_B
+```
+
+will mount the output path of `some_repo_A, task_A` to `/dataA`, and `some_repo_B, task_B` to `/dataB`.
+
+## Trying it out
+
+
+If you just want to try it out, do the following:
+
+```
+## INSTALL
+git clone git@github.com:apsod/trustpipe.git
+cd trustpipe
+pip install -e .
+## RUN
+cd conf
+luigi --module trustpipe.tasks DockerTask --repo apsod/litbank.git  --branch small --subpath process --local-scheduler
+```
+
+This will start a job that downloads some books form litteraturbanken and converts them to plain text using pandoc, putting data in `/data/trustpipe/data/...`

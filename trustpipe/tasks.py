@@ -101,18 +101,24 @@ class PullTask(luigi.Task):
             visibility=ParameterVisibility.PRIVATE)
 
     
+    @property
     def slug(self):
         return slug(self.repo, self.branch, self.subpath)
-
-    def hashdigest(self):
+    
+    @property
+    def hash(self):
         return hashdigest(self.repo, self.branch, self.subpath)
+    
+    @property
+    def basename(self):
+        return f'{self.slug}_{self.hash}'
 
-    def basename(self, suffix=''):
-        return f'{self.slug()}_{self.hashdigest()}{suffix}'
-
+    def storage(self):
+        fmt_mapping = dict(task=self)
+        return pathlib.Path() / repostore().store.format_map(fmt_mapping)
 
     def output(self):
-        return RepoTarget.make(self.basename('.json'))
+        return RepoTarget.make(f'{self.basename}.json')
 
     def git_url(self):
         assert self.repo.endswith('.git'), 'repo must end with .git'
@@ -120,7 +126,7 @@ class PullTask(luigi.Task):
         return f'{self.prefix}{self.repo}'
 
     def run(self):
-        storage = pathlib.Path() / repostore().store / self.basename()
+        storage = self.storage()
         META = dict(
                 task = self.get_task_family(),
                 args = self.to_str_params(),
@@ -169,20 +175,24 @@ class DockerTask(luigi.Task):
         self.__logger = logger
         self._client = docker.client.from_env()
     
+    @property
     def slug(self):
         return slug(self.repo, self.branch, self.subpath)
 
-    def hashdigest(self):
+    @property
+    def hash(self):
         return hashdigest(self.repo, self.branch, self.subpath)
+    
+    @property
+    def basename(self):
+        return f'{self.slug}_{self.hash}'
 
-    def basename(self, suffix=''):
-        return f'{self.slug()}_{self.hashdigest()}{suffix}'
-
-    #def storage(self):
-    #    return pathlib.Path() / datastore().store / self.basename()
+    def storage(self, spec):
+        fmt_mapping = dict(spec=spec, task=self)
+        return pathlib.Path() / datastore().store.format_map(fmt_mapping)
 
     def output(self):
-        return DataTarget.make(self.basename('.json'))
+        return DataTarget.make(f'{self.basename}.json')
 
     def run(self):
         self.__logger.info('pulling repo')
@@ -192,7 +202,7 @@ class DockerTask(luigi.Task):
         names = spec.depends_on.keys()
         trgs = yield [spec.depends_on[name].to_task() for name in names]
 
-        storage = str(pathlib.Path() / datastore().store / spec.name / spec.kind)
+        storage = str(self.storage(spec))
 
         binds = [to_bind(storage, spec.output)]
         binds += [to_bind(trg.path(), f'/{name}', read_only=True) for name, trg in zip(names, trgs)]
@@ -202,6 +212,8 @@ class DockerTask(luigi.Task):
                 storage = storage,
                 args = self.to_str_params(),
                 spec = asdict(spec),
+                pulled = repo.read(),
+                upstreams = [trg.read() for trg in trgs],
                 )
 
         with self.output().catalogize(**META) as log:
@@ -213,8 +225,8 @@ class DockerTask(luigi.Task):
             #TODO: Add possibility to mount cache volumes? or other kinds of volumes? (Is it needed?)
             logs = self._client.containers.run(
                 img,
-                name=self.slug(),
-                auto_remove=True,
+                name=self.slug,
+                remove=True,
                 volumes=binds,  # TODO: should we not depend on /data being where the container puts data?
                 stream=True,
                 stdout=True,
