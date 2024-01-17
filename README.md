@@ -3,8 +3,6 @@ Luigu/docker workflow to deal with data ingestion.
 
 ## Installation
 
-To install, 
-
 ```
 git clone git@github.com:apsod/trustpipe.git
 cd trustpipe
@@ -177,3 +175,26 @@ luigi --module trustpipe.tasks DockerTask --repo apsod/litbank.git  --branch sma
 ```
 
 This will start a job that downloads some books form litteraturbanken and converts them to plain text using pandoc, putting data in `/data/trustpipe/data/...`
+
+## Command Line Interface (CLI)
+
+The trustpipe CLI is available via the command `trustpipe` and offers various functionalities.
+
+### List Completed Tasks
+A list of completed tasks can be printed with
+`trustpipe list`. The output can be filtered using optional flags. 
+
+```
+$ trustpipe list --help
+
+Usage: trustpipe list [OPTIONS]
+
+  LIST COMPLETED TASKS. USE OPTIONS BELOW TO FILTER JSON FILES.
+
+Options:
+  --jq_filter TEXT  filter json files using jq filter, e.g. '.spec.kind =
+                    "process"'
+  --kind TEXT       filter json files by kind, e.g. process
+  --name TEXT       filter json files by name, e.g. litteraturbanken
+  --help            Show this message and exit.
+```
