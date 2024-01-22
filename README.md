@@ -95,7 +95,9 @@ output: /data
 
 When we run
 ```
-luigi --module trustpipe.tasks DockerTask --repo apsod/litbank.git  --branch small --subpath ingest
+luigi --module trustpipe.tasks DockerTask --ref git@github.com:apsod/litbank.git#small:ingest
+#                                               git@github.com:REPO#REF:PATH
+
 ```
 Trustpipe clones the specified subpath of the repo (and branch/tag), builds the docker image, and runs it, mounting the folder specified by `datastore` to the tasks output.
 
@@ -130,7 +132,7 @@ Here, we specify that this task depends on another task (specified by a repo, su
 
 When we run
 ```
-luigi --module trustpipe.tasks DockerTask --repo apsod/litbank.git  --branch small --subpath process
+luigi --module trustpipe.tasks DockerTask --ref git@github.com:apsod/litbank.git#small:process
 ```
 
 Trustpipe does the following:
@@ -171,7 +173,7 @@ cd trustpipe
 pip install -e .
 ## RUN
 cd conf
-luigi --module trustpipe.tasks DockerTask --repo apsod/litbank.git  --branch small --subpath process --local-scheduler
+luigi --module trustpipe.tasks DockerTask --ref git@github.com:apsod/litbank.git#small:process --local-scheduler
 ```
 
 This will start a job that downloads some books form litteraturbanken and converts them to plain text using pandoc, putting data in `/data/trustpipe/data/...`
