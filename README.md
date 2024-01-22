@@ -11,36 +11,22 @@ pip install -e .
 
 Trustpipe uses ssh to clone repos, if you get an error like `permission denied (publickey)`, you have not configured git/github to use ssh, and it will (currently) not work.
 
-## Configuration
+## Trying it out
 
-In `luigi.cfg` you can configure where the images and data is put:
+
+If you just want to try it out, do the following, (preferrably in a conda environment or venv):
 
 ```
-[catalog]
-# Root folder for metadata and luigi targets
-root=/data/trustpipe/catalog
-
-# The following *store* paths are where the orchestrator puts data.
-[repostore]
-# Folder for repos
-# task.repo, task.subpath, task.branch
-# task.slug, task.hash, task.basename (task.slug_task.hash)
-store=/data/trustpipe/repos/{task.basename}
-
-[datastore]
-# Folder for ingestion
-# task.repo, task.subpath, task.branch
-# task.slug, task.hash, task.basename
-# spec.name, spec.kind, spec. ...
-store=/data/trustpipe/data/{task.basename}
+## INSTALL
+git clone git@github.com:apsod/trustpipe.git
+cd trustpipe
+pip install -e .
+## RUN
+cd conf
+luigi --module trustpipe.tasks DockerTask --ref git@github.com:apsod/litbank.git#small:process --local-scheduler
 ```
 
-When you have configured trustpipe to your liking, put the config file in `/etc/luigi/luigi.cfg`, or point to it using the environment variable `LUIGI_CONFIG_PATH`. 
-To start the central scheduler, run the luigi demon (in a screen or tmux): `luigid`
-
-The central scheduler makes sure that we don't start several competing runs of the same task. If you want to try it without the central scheduler, simply add `--local-scheduler` to the luigi calls.
-
-**NOTE**: The paths in the configuration need to be absolute. 
+This will start a job that downloads some books from litteraturbanken and converts them to plain text using pandoc, putting data in `path/to/trustpipe/conf/test/data/...`
 
 ## What it does
 
@@ -157,22 +143,41 @@ depends_on:
 
 will mount the output path of `some_repo_A, task_A` to `/dataA`, and `some_repo_B, task_B` to `/dataB`.
 
-## Trying it out
+The idea is to make it simpler to write ingestion and processing scripts that are as portable as possible, and that are agnostic to the underlying filesystem. 
 
+## Configuration
 
-If you just want to try it out, do the following:
+In `luigi.cfg` you can configure where the images and data is put:
 
 ```
-## INSTALL
-git clone git@github.com:apsod/trustpipe.git
-cd trustpipe
-pip install -e .
-## RUN
-cd conf
-luigi --module trustpipe.tasks DockerTask --ref git@github.com:apsod/litbank.git#small:process --local-scheduler
+[catalog]
+# Root folder for metadata and luigi targets
+root=test/catalog
+
+# The following *store* paths are where the orchestrator puts data.
+[repostore]
+# Folder for repos
+# task.repo, task.subpath, task.branch
+# task.slug, task.hash, task.basename (task.slug_task.hash)
+store=test/repos/{task.basename}
+
+[datastore]
+# Folder for ingestion
+# task.repo, task.subpath, task.branch
+# task.slug, task.hash, task.basename (task.slug_task.hash)
+# spec.name, spec.kind, spec.X ...
+store=test/data/{task.basename}
+#store=/data/trustpipe/data/{spec.name}/{spec.kind}
 ```
 
-This will start a job that downloads some books form litteraturbanken and converts them to plain text using pandoc, putting data in `/data/trustpipe/data/...`
+The default configuration uses relative paths, which are **not recommended** for actual use, but are there for demonstration purposes.
+When you have configured trustpipe to your liking, put the config file in `/etc/luigi/luigi.cfg`, or point to it using the environment variable `LUIGI_CONFIG_PATH`.
+
+## Central scheduler
+
+To start the central scheduler, run the luigi demon (in a screen or tmux): `luigid`
+
+The central scheduler makes sure that we don't start several competing runs of the same task. If you want to try it without the central scheduler, simply add `--local-scheduler` to the luigi calls, but beware that this makes it possible that we have several competing runs of the same task.
 
 ## Command Line Interface (CLI)
 

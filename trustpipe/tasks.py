@@ -240,7 +240,6 @@ class DockerTask(luigi.Task):
 
         with self.output().catalogize(**META) as log:
             img = repo.build_image(self._client, self.__logger)
-            logger.info('removing repo')
             log['image'] = img.id
             log['binds'] = binds
             logger.info(json.dumps(log))
