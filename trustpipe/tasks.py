@@ -113,21 +113,13 @@ class PullTask(luigi.Task):
             self.hash = hashdigest(self.repo, self.branch, self.path)
         else:
             self.is_git = False
-            self.path = (pathlib.Path() / self.ref).absolute()
+            self.path = str((pathlib.Path() / self.ref).absolute())
             self.slug = slug(self.path)
             self.hash = hashdigest(self.path)
 
         if self.must_be_git:
             assert self.is_git
-    
-    @property
-    def slug(self):
-        return slug(self.ref)
-    
-    @property
-    def hash(self):
-        return hashdigest(self.ref)
-    
+
     @property
     def basename(self):
         return f'{self.slug}_{self.hash}'
@@ -190,14 +182,19 @@ class DockerTask(luigi.Task):
         super().__init__(*args, **kwargs)
         self.__logger = logger
         self._client = docker.client.from_env()
-    
-    @property
-    def slug(self):
-        return slug(self.ref)
 
-    @property
-    def hash(self):
-        return hashdigest(self.ref)
+        if (m := gitpattern.match(self.ref)):
+            self.is_git = True
+            self.repo = m.group('repo')
+            self.branch = m.group('branch')
+            self.path = m.group('path')
+            self.slug = slug(self.repo, self.branch, self.path)
+            self.hash = hashdigest(self.repo, self.branch, self.path)
+        else:
+            self.is_git = False
+            self.path = str((pathlib.Path() / self.ref).absolute())
+            self.slug = slug(self.path)
+            self.hash = hashdigest(self.path)
     
     @property
     def basename(self):
