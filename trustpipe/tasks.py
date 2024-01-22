@@ -259,7 +259,7 @@ class DockerTask(luigi.Task):
 
 def cleanup(task):
     logger.info('removing container')
-    task._client.containers.get(task.slug)
+    task._client.containers.get(task.slug).remove()
     logger.info('removing repo')
     shutil.rmtree(task.input().path())
     task.input().fs_target.remove()
