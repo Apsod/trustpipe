@@ -150,11 +150,9 @@ name: test
 kind: process
 depends_on:
   dataA: 
-    repo: some_repo_A
-    subpath: task_A
+    ref: git@github.com:some_repo_A
   dataB:
-    repo: some_repo_B
-    subpath: task_B
+    ref: git@github.com:some_repo_B
 ```
 
 will mount the output path of `some_repo_A, task_A` to `/dataA`, and `some_repo_B, task_B` to `/dataB`.
