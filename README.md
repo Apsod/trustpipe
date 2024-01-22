@@ -123,9 +123,7 @@ name: litteraturbanken
 kind: process
 depends_on:
   input: 
-    repo: apsod/litbank.git
-    subpath: ingest
-    branch: small
+    ref: git@ighub.com:apsod/litbank.git#small:ingest
 ```
 
 Here, we specify that this task depends on another task (specified by a repo, subpath, and branch), namely the above ingest task. We also specify that the local **name** of this task is `input`.
