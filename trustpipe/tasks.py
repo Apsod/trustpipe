@@ -124,9 +124,13 @@ class PullTask(luigi.Task):
     def basename(self):
         return f'{self.slug}_{self.hash}'
 
-    def storage(self):
+    def storage(self, absolute=True):
         fmt_mapping = dict(task=self)
-        return pathlib.Path() / repostore().store.format_map(fmt_mapping)
+        path = pathlib.Path() / repostore().store.format_map(fmt_mapping)
+        if absolute:
+            return path.absolute()
+        else:
+            return path
 
     def output(self):
         return RepoTarget.make(f'{self.basename}.json')
@@ -200,9 +204,14 @@ class DockerTask(luigi.Task):
     def basename(self):
         return f'{self.slug}_{self.hash}'
 
-    def storage(self, spec):
+    def storage(self, spec, absolute=True):
         fmt_mapping = dict(spec=spec, task=self)
-        return pathlib.Path() / datastore().store.format_map(fmt_mapping)
+        path = pathlib.Path() / datastore().store.format_map(fmt_mapping)
+        if absolute:
+            return path.absolute()
+        else:
+            return path
+        return path
 
     def output(self):
         return DataTarget.make(f'{self.basename}.json')
@@ -239,7 +248,6 @@ class DockerTask(luigi.Task):
             logs = self._client.containers.run(
                 img,
                 name=self.slug,
-                remove=True,
                 volumes=binds,  # TODO: should we not depend on /data being where the container puts data?
                 stream=True,
                 stdout=True,
@@ -249,17 +257,21 @@ class DockerTask(luigi.Task):
             for item in logs:
                 self.__logger.info(item.decode('utf-8').rstrip())
 
-@DockerTask.event_handler(luigi.Event.SUCCESS)
-def on_run_success(task):
+def cleanup(task):
+    logger.info('removing container')
+    task._client.containers.get(task.slug)
     logger.info('removing repo')
     shutil.rmtree(task.input().path())
     task.input().fs_target.remove()
 
+@DockerTask.event_handler(luigi.Event.SUCCESS)
+def on_run_success(task):
+    cleanup(task)
+
+
 @DockerTask.event_handler(luigi.Event.FAILURE)
 def on_run_failure(task, exception):
-    logger.info('removing repo')
-    shutil.rmtree(task.input().path())
-    task.input().fs_target.remove()
+    cleanup(task)
 
 ###
 #
