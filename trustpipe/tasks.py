@@ -1,4 +1,5 @@
 import logging
+import re
 import json
 import os
 import pathlib
@@ -31,12 +32,10 @@ logger = logging.getLogger('luigi-interface')
 
 @dataclass
 class RepoSpec:
-    repo: str = MISSING
-    subpath: str = "."
-    branch: str = "main"
+    ref: str = MISSING
     
     def to_task(self):
-        return DockerTask(self.repo, self.subpath, self.branch)
+        return DockerTask(ref=self.ref, must_be_git=True)
 
 @dataclass
 class TaskSpec:
@@ -87,27 +86,47 @@ class RepoTarget(CatalogTarget):
     def dependencies(self):
         return self.spec().depends_on
 
+gitpattern = re.compile(r'(?P<repo>git@.*:.*.git)#(?P<branch>.*):(?P<path>.*)')
+
 class repostore(luigi.Config):
     store = luigi.Parameter()
 
 class PullTask(luigi.Task):
-    repo = luigi.Parameter()
-    subpath = luigi.Parameter(".")
-    branch = luigi.Parameter("main")
+    ref = luigi.Parameter()
+    must_be_git = luigi.Parameter(default=False, visibility=ParameterVisibility.HIDDEN)
+    
+    def __init__(self, *args, **kwargs):
+        '''
+        When a new instance of the IngestTask class gets created:
+        - call the parent class __init__ method
+        - start the logger
+        - init an instance of the docker client
+        '''
+        super().__init__(*args, **kwargs)
 
-    prefix = luigi.Parameter(
-            default='git@github.com:', 
-            significant=False, 
-            visibility=ParameterVisibility.PRIVATE)
+        if (m := gitpattern.match(self.ref)):
+            self.is_git = True
+            self.repo = m.group('repo')
+            self.branch = m.group('branch')
+            self.path = m.group('path')
+            self.slug = slug(self.repo, self.branch, self.path)
+            self.hash = hashdigest(self.repo, self.branch, self.path)
+        else:
+            self.is_git = False
+            self.path = (pathlib.Path() / self.ref).absolute()
+            self.slug = slug(self.path)
+            self.hash = hashdigest(self.path)
 
+        if self.must_be_git:
+            assert self.is_git
     
     @property
     def slug(self):
-        return slug(self.repo, self.branch, self.subpath)
+        return slug(self.ref)
     
     @property
     def hash(self):
-        return hashdigest(self.repo, self.branch, self.subpath)
+        return hashdigest(self.ref)
     
     @property
     def basename(self):
@@ -120,11 +139,6 @@ class PullTask(luigi.Task):
     def output(self):
         return RepoTarget.make(f'{self.basename}.json')
 
-    def git_url(self):
-        assert self.repo.endswith('.git'), 'repo must end with .git'
-        assert not self.subpath.startswith('/'), 'subpaths must be relative'
-        return f'{self.prefix}{self.repo}'
-
     def run(self):
         storage = self.storage()
         META = dict(
@@ -133,10 +147,13 @@ class PullTask(luigi.Task):
                 storage = str(storage),
                 )
         with self.output().catalogize(**META) as log:
-            with get_repo(self.git_url(), self.subpath, self.branch) as repo:
-                log['SHA'] = repo.sha
-                storage.parent.mkdir(parents=True, exist_ok=True)
-                shutil.move(repo.path, str(storage))
+            storage.parent.mkdir(parents=True, exist_ok=True)
+            if self.is_git:
+                with get_repo(self.repo, self.path, self.branch) as repo:
+                    log['SHA'] = repo.sha
+                    shutil.move(repo.path, str(storage))
+            else:
+                shutil.copytree(self.path, str(storage))
 
 ###
 #
@@ -161,7 +178,6 @@ class DataTarget(CatalogTarget):
 class datastore(luigi.Config):
     store = luigi.Parameter()
 
-
 @requires(PullTask)
 class DockerTask(luigi.Task):
     def __init__(self, *args, **kwargs):
@@ -177,11 +193,11 @@ class DockerTask(luigi.Task):
     
     @property
     def slug(self):
-        return slug(self.repo, self.branch, self.subpath)
+        return slug(self.ref)
 
     @property
     def hash(self):
-        return hashdigest(self.repo, self.branch, self.subpath)
+        return hashdigest(self.ref)
     
     @property
     def basename(self):
