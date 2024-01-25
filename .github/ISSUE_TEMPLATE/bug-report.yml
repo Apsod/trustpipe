@@ -21,12 +21,12 @@ body:
     attributes:
       label: 🐛 Describe the bug
       description: |
-        Please provide a clear and concise description of what the bug is. If relevant, add a minimal example so that we can reproduce the error by running the code. Please also paste or describe the results you observe instead of the expected results. If you observe an error, please paste the error message including the **full** traceback of the exception.
+        Please provide a clear and concise description of what the bug is. If relevant, add a minimal example so that we can reproduce the error by running the code, including (if applicable) the data asset in question. Please also paste or describe the results you observe instead of the expected results. If you observe an error, please paste the error message including the **full** traceback of the exception.
       placeholder: |
         A clear and concise description of what the bug is.
 
-        ```python
-        # Sample code to reproduce the problem
+        ```
+        # Sample command (or code) to reproduce the problem
         ```
 
         ```
