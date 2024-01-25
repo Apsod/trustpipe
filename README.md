@@ -181,6 +181,32 @@ The central scheduler makes sure that we don't start several competing runs of t
 
 The trustpipe CLI is available via the command `trustpipe` and offers various functionalities.
 
+### Run Tasks
+Start runs using the `trustpipe run` command. This will run tasks using luigi. 
+
+```
+Usage: trustpipe run [OPTIONS] [REF]...
+
+  Run REF(s).
+
+  REF is a github reference of the form: git@github.com:REPO.git#BRANCH:PATH
+  (or a local path for testing purposes).
+
+Options:
+  --workers INTEGER               Numbers of concurrent tasks to run. Defaults
+                                  to the number of REFs supplied.
+  --must-be-git / --can-be-other  If must-be-git is set (default), the
+                                  references supplied must be references to
+                                  git repos. Otherwise (--can-be-other), file
+                                  paths can be used as references.
+  --local-scheduler / --global-scheduler
+                                  If global-scheduler is set (default), the
+                                  global scheduler will be used. If local
+                                  scheduler is set, a local scheduler will be
+                                  used (beware of conflicting runs).
+  --help                          Show this message and exit.
+```
+
 ### List Completed Tasks
 A list of completed tasks can be printed with
 `trustpipe list`. The output can be filtered using optional flags. 
