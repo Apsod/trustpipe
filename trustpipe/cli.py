@@ -3,9 +3,10 @@
 import os
 import click
 import jq
+import luigi
 from typing import Optional, List
 
-from trustpipe.tasks import DataTarget
+from trustpipe.tasks import DataTarget, DockerTask
 
 
 #################################
@@ -45,6 +46,39 @@ def main() -> None:
     """CLI FOR TRUSTPIPE"""
     pass
 
+#################################
+# CLI: RUN
+#################################
+@main.command(name="run")
+@click.argument('ref', nargs=-1)
+@click.option(
+    '--workers',
+    type=int,
+    required=False,
+    help="Numbers of concurrent tasks to run. Defaults to the number of REFs supplied.")
+@click.option(
+    '--must-be-git/--can-be-other', 
+    default=True,
+    help="If must-be-git is set (default), the references supplied must be references to git repos. Otherwise (--can-be-other), file paths can be used as references.",
+    )
+@click.option(
+    '--local-scheduler/--global-scheduler', 
+    default=False,
+    help="If global-scheduler is set (default), the global scheduler will be used. If local scheduler is set, a local scheduler will be used (beware of conflicting runs)."
+    )
+def entry_point_run(ref: list[str], workers: Optional[int], must_be_git: bool, local_scheduler: bool):
+    """Run REF(s).
+    
+    REF is a github reference of the form: git@github.com:REPO.git#BRANCH:PATH (or a local path for testing purposes).
+    """
+    _workers = len(ref) if workers is None else workers
+    luigi.build([DockerTask(ref=r, must_be_git=must_be_git) for r in ref], workers=_workers, local_scheduler=local_scheduler)
+
+
+
+#################################
+# CLI: LIST
+#################################
 
 @main.command(name="list")
 @click.option(

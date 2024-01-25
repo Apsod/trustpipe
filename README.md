@@ -23,7 +23,7 @@ cd trustpipe
 pip install -e .
 ## RUN
 cd conf
-luigi --module trustpipe.tasks DockerTask --ref git@github.com:apsod/litbank.git#small:process --local-scheduler
+trustpipe run git@github.com:apsod/litbank.git#small:process --local-scheduler
 ```
 
 This will start a job that downloads some books from litteraturbanken and converts them to plain text using pandoc, putting data in `path/to/trustpipe/conf/test/data/...`
@@ -81,11 +81,9 @@ output: /data
 
 When we run
 ```
-luigi --module trustpipe.tasks DockerTask --ref git@github.com:apsod/litbank.git#small:ingest
-#                                               git@github.com:REPO#REF:PATH
-
+trustpipe run git@github.com:apsod/litbank.git#small:ingest
 ```
-Trustpipe clones the specified subpath of the repo (and branch/tag), builds the docker image, and runs it, mounting the folder specified by `datastore` to the tasks output.
+Trustpipe clones the specified subpath of the repo (and branch/tag), builds the docker image, and runs it, mounting the folder specified by `datastore` to the tasks output. The git reference format is `git@github.com:REPO#BRANCH:PATH`
 
 ### Dependencies
 
@@ -116,7 +114,7 @@ Here, we specify that this task depends on another task (specified by a repo, su
 
 When we run
 ```
-luigi --module trustpipe.tasks DockerTask --ref git@github.com:apsod/litbank.git#small:process
+trustpipe run git@github.com:apsod/litbank.git#small:process
 ```
 
 Trustpipe does the following:
