@@ -14,7 +14,7 @@ setup(
         'sqlalchemy==1.4.46',
         'luigi==3.4',
         'docker==6.1',
-        'gitpython==3.1',
+        'gitpython==3.1.41',
         'omegaconf==2.3.0',
         'python-slugify==8.0.1',
         'jq==1.6.0',
