@@ -35,7 +35,7 @@ class RepoSpec:
     ref: str = MISSING
     
     def to_task(self):
-        return DockerTask(ref=self.ref, must_be_git=True)
+        return RunTask(ref=self.ref, must_be_git=True)
 
 @dataclass
 class TaskSpec:
@@ -88,6 +88,25 @@ class RepoTarget(CatalogTarget):
 
 gitpattern = re.compile(r'(?P<repo>git@.*:.*.git)#(?P<branch>.*):(?P<path>.*)')
 
+def set_from_ref(task, ref):
+    if (m := gitpattern.match(ref)):
+        task.is_git = True
+        task.repo = m.group('repo')
+        task.branch = m.group('branch')
+        task.path = m.group('path')
+
+        spec = (task.repo, task.branch, task.path)
+
+    else:
+        task.is_git = False
+        task.path = str((pathlib.Path() / ref).absolute())
+
+        spec = (task.path, )
+
+    task.slug = slug(*spec)
+    task.hash = hashdigest(*spec)
+
+
 class repostore(luigi.Config):
     store = luigi.Parameter()
 
@@ -103,20 +122,7 @@ class PullTask(luigi.Task):
         - init an instance of the docker client
         '''
         super().__init__(*args, **kwargs)
-
-        if (m := gitpattern.match(self.ref)):
-            self.is_git = True
-            self.repo = m.group('repo')
-            self.branch = m.group('branch')
-            self.path = m.group('path')
-            self.slug = slug(self.repo, self.branch, self.path)
-            self.hash = hashdigest(self.repo, self.branch, self.path)
-        else:
-            self.is_git = False
-            self.path = str((pathlib.Path() / self.ref).absolute())
-            self.slug = slug(self.path)
-            self.hash = hashdigest(self.path)
-
+        set_from_ref(self, self.ref)
         if self.must_be_git:
             assert self.is_git
 
@@ -175,7 +181,8 @@ class datastore(luigi.Config):
     store = luigi.Parameter()
 
 @requires(PullTask)
-class DockerTask(luigi.Task):
+class DataTask(luigi.Task):
+    storage_override = luigi.Parameter(default='', visibility=ParameterVisibility.HIDDEN)
     def __init__(self, *args, **kwargs):
         '''
         When a new instance of the IngestTask class gets created:
@@ -184,46 +191,63 @@ class DockerTask(luigi.Task):
         - init an instance of the docker client
         '''
         super().__init__(*args, **kwargs)
-        self.__logger = logger
-        self._client = docker.client.from_env()
+        self._logger = logger
+        self._cleanups = []
+        set_from_ref(self, self.ref)
 
-        if (m := gitpattern.match(self.ref)):
-            self.is_git = True
-            self.repo = m.group('repo')
-            self.branch = m.group('branch')
-            self.path = m.group('path')
-            self.slug = slug(self.repo, self.branch, self.path)
-            self.hash = hashdigest(self.repo, self.branch, self.path)
-        else:
-            self.is_git = False
-            self.path = str((pathlib.Path() / self.ref).absolute())
-            self.slug = slug(self.path)
-            self.hash = hashdigest(self.path)
-    
     @property
     def basename(self):
         return f'{self.slug}_{self.hash}'
 
     def storage(self, spec, absolute=True):
-        fmt_mapping = dict(spec=spec, task=self)
-        path = pathlib.Path() / datastore().store.format_map(fmt_mapping)
+        if self.storage_override:
+            path = pathlib.Path() / self.storage_override
+        
+        else:
+            fmt_mapping = dict(spec=spec, task=self)
+            path = pathlib.Path() / datastore().store.format_map(fmt_mapping)
+
         if absolute:
             return path.absolute()
-        else:
-            return path
         return path
 
     def output(self):
         return DataTarget.make(f'{self.basename}.json')
 
+    def add_cleanup(self, name, function):
+        self._cleanups.append((name, function))
+    
+    def on_success(self):
+        for name, fun in self._cleanups:
+            self._logger.info(f'cleanup [{name}] ....')
+            fun()
+            self._logger.info(f'cleanup [{name}] DONE')
+
+    def on_failure(self, exception):
+        self.on_success()
+        return str(exception)
+
+
+class RunTask(DataTask):
+    def __init__(self, *args, **kwargs):
+        '''
+        When a new instance of the IngestTask class gets created:
+        - call the parent class __init__ method
+        - start the logger
+        - init an instance of the docker client
+        '''
+        super().__init__(*args, **kwargs)
+        self._client = docker.client.from_env()
+    
     def run(self):
-        self.__logger.info('pulling repo')
+        self.add_cleanup('repo catalog', mk_repo_catalog_cleanup(self))
         repo = self.input()
         spec = repo.spec()
+        self.add_cleanup('repo store', mk_repo_store_cleanup(self))
 
         names = spec.depends_on.keys()
         trgs = yield [spec.depends_on[name].to_task() for name in names]
-
+    
         storage = str(self.storage(spec))
 
         binds = [to_bind(storage, spec.output)]
@@ -239,66 +263,55 @@ class DockerTask(luigi.Task):
                 )
 
         with self.output().catalogize(**META) as log:
-            img = repo.build_image(self._client, self.__logger)
+            img = repo.build_image(self._client, logger)
             log['image'] = img.id
             log['binds'] = binds
-            logger.info(json.dumps(log))
+            self._logger.info(json.dumps(log))
             #TODO: Add possibility to mount cache volumes? or other kinds of volumes? (Is it needed?)
             logs = self._client.containers.run(
                 img,
                 name=self.slug,
-                volumes=binds,  # TODO: should we not depend on /data being where the container puts data?
+                volumes=binds,
                 stream=True,
                 stdout=True,
                 stderr=True,
             )
+
+            self.add_cleanup('container', mk_container_cleanup(self))
         
             for item in logs:
-                self.__logger.info(item.decode('utf-8').rstrip())
-
-def cleanup(task):
-    logger.info('removing container')
-    task._client.containers.get(task.slug).remove()
-    logger.info('removing repo')
-    shutil.rmtree(task.input().path())
-    task.input().fs_target.remove()
-
-@DockerTask.event_handler(luigi.Event.SUCCESS)
-def on_run_success(task):
-    cleanup(task)
+                self._logger.info(item.decode('utf-8').rstrip())
 
 
-@DockerTask.event_handler(luigi.Event.FAILURE)
-def on_run_failure(task, exception):
-    cleanup(task)
-
-###
-#
-# TASKS THAT WRAPS MULTIPLE REPOS
-#
-###
-
-@requires(PullTask)
-class WrapperTask(luigi.WrapperTask):
-    def __init__(self, *args, **kwargs):
-        '''
-        When a new instance of the IngestTask class gets created:
-        - call the parent class __init__ method
-        - start the logger
-        - init an instance of the docker client
-        '''
-        super().__init__(*args, **kwargs)
-        self.__logger = logger
-        self._client = docker.client.from_env()
-
+class MockTask(DataTask):
     def run(self):
-        self.__logger.info('pulling repo')
+        self.add_cleanup('repo catalog', mk_repo_catalog_cleanup(self))
         repo = self.input()
         spec = repo.spec()
+        self.add_cleanup('repo store', mk_repo_store_cleanup(self))
 
         names = spec.depends_on.keys()
-        self.__logger.info('running wrapped')
-        trgs = yield [spec.depends_on[name].to_task() for name in names]
+        storage = str(self.storage(spec))
+        META = dict(
+                task = self.get_task_family(),
+                storage = storage,
+                args = self.to_str_params(),
+                spec = asdict(spec),
+                pulled = repo.read(),
+                )
+        with self.output().catalogize(**META) as log:
+            pass
 
-    def complete(self):
-        return False
+
+def mk_container_cleanup(task):
+    client = task._client
+    name = task.slug
+    return lambda: client.containers.get(name).remove()
+
+def mk_repo_store_cleanup(task):
+    path = task.input().path()
+    return lambda: shutil.rmtree(path)
+
+def mk_repo_catalog_cleanup(task):
+    trg = task.input().fs_target
+    return lambda: trg.remove()

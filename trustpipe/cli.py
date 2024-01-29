@@ -6,7 +6,7 @@ import jq
 import luigi
 from typing import Optional, List
 
-from trustpipe.tasks import DataTarget, DockerTask
+from trustpipe import DataTarget, RunTask, MockTask
 
 
 #################################
@@ -46,6 +46,40 @@ def main() -> None:
     """CLI FOR TRUSTPIPE"""
     pass
 
+
+#################################
+# CLI: MOCK
+#################################
+@main.command(name="mock")
+@click.argument('ref', nargs=-1)
+@click.option(
+    '--path',
+    type=str,
+    required=False,
+    help="Location to mark as output directory of REF",
+)
+@click.option(
+    '--must-be-git/--can-be-other', 
+    default=True,
+    help="If must-be-git is set (default), the references supplied must be references to git repos. Otherwise (--can-be-other), file paths can be used as references.",
+    )
+@click.option(
+    '--local-scheduler/--global-scheduler', 
+    default=False,
+    help="If global-scheduler is set (default), the global scheduler will be used. If local scheduler is set, a local scheduler will be used (beware of conflicting runs)."
+    )
+def entry_point_mock(ref: list[str], path: Optional[str], must_be_git: bool, local_scheduler: bool):
+    """Mock REF(s).
+    
+    Mock the run of REFs. Each supplied ref will be marked as done.
+    If only one REF is supplied, we can point to a path and mark that as the output directory, 
+    rather than the default according to trustpipe. 
+    """
+    # assert (Path is not None) implies len(ref) == 1
+    assert (path is None) or len(ref) == 1, "We can only mock one ref if path is given"
+    _workers = len(ref)
+    luigi.build([MockTask(ref=r, must_be_git=must_be_git, storage_override=path if path is not None else '') for r in ref], workers=_workers, local_scheduler=local_scheduler)
+
 #################################
 # CLI: RUN
 #################################
@@ -72,7 +106,7 @@ def entry_point_run(ref: list[str], workers: Optional[int], must_be_git: bool, l
     REF is a github reference of the form: git@github.com:REPO.git#BRANCH:PATH (or a local path for testing purposes).
     """
     _workers = len(ref) if workers is None else workers
-    luigi.build([DockerTask(ref=r, must_be_git=must_be_git) for r in ref], workers=_workers, local_scheduler=local_scheduler)
+    luigi.build([RunTask(ref=r, must_be_git=must_be_git) for r in ref], workers=_workers, local_scheduler=local_scheduler)
 
 
 

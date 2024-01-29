@@ -6,6 +6,7 @@ import pathlib
 import json
 import os
 import logging
+import traceback
 
 import luigi
 
@@ -43,8 +44,9 @@ On exiting the with-statement the log object is written to the fs_target
 (And consequently, the target will *exist* after exiting the with-statement)
 """
 class CatalogTarget(luigi.Target):
-    def __init__(self, fs_target):
+    def __init__(self, fs_target, log_path):
         self.fs_target = fs_target
+        self.log_path = log_path
 
     @classmethod
     def catalog_root(cls):
@@ -52,9 +54,10 @@ class CatalogTarget(luigi.Target):
 
     @classmethod
     def make(cls, path, **kwargs):
-        fspath = str(cls.catalog_root() / path)
-        target = luigi.LocalTarget(fspath, **kwargs)
-        return cls(target)
+        final_path = str(cls.catalog_root() / path)
+        fs_target = luigi.LocalTarget(final_path, **kwargs)
+        log_path = str(cls.catalog_root() / f'log.{path}')
+        return cls(fs_target, log_path)
 
     @contextmanager
     def catalogize(self, **kwargs):
@@ -68,8 +71,12 @@ class CatalogTarget(luigi.Target):
         except Exception as e:
             item['duration']['stop'] = datetime.now().isoformat()
             item['done'] = False
+            item['traceback'] = ''.join(traceback.format_tb(e.__traceback__))
             item_str = json.dumps(item)
             logger.error(item_str)
+            with open(self.log_path, 'a') as h:
+                h.write(item_str)
+                h.write('\n')
             raise e
         else:
             item['duration']['stop'] = datetime.now().isoformat()
