@@ -1,13 +1,17 @@
 """Command Line Interface of trustpipe"""
 
 import os
-import click
+import shutil
+import pathlib
+import json
+from typing import Optional, List
+from dataclasses import dataclass
+
+from trustpipe import DataTarget, RunTask, MockTask, RepoTarget
+
 import jq
 import luigi
-from typing import Optional, List
-
-from trustpipe import DataTarget, RunTask, MockTask
-
+import click
 
 #################################
 # HELPERS
@@ -48,40 +52,7 @@ def main() -> None:
 
 
 #################################
-# CLI: MOCK
-#################################
-@main.command(name="mock")
-@click.argument('ref', nargs=-1)
-@click.option(
-    '--path',
-    type=str,
-    required=False,
-    help="Location to mark as output directory of REF",
-)
-@click.option(
-    '--must-be-git/--can-be-other', 
-    default=True,
-    help="If must-be-git is set (default), the references supplied must be references to git repos. Otherwise (--can-be-other), file paths can be used as references.",
-    )
-@click.option(
-    '--local-scheduler/--global-scheduler', 
-    default=False,
-    help="If global-scheduler is set (default), the global scheduler will be used. If local scheduler is set, a local scheduler will be used (beware of conflicting runs)."
-    )
-def entry_point_mock(ref: list[str], path: Optional[str], must_be_git: bool, local_scheduler: bool):
-    """Mock REF(s).
-    
-    Mock the run of REFs. Each supplied ref will be marked as done.
-    If only one REF is supplied, we can point to a path and mark that as the output directory, 
-    rather than the default according to trustpipe. 
-    """
-    # assert (Path is not None) implies len(ref) == 1
-    assert (path is None) or len(ref) == 1, "We can only mock one ref if path is given"
-    _workers = len(ref)
-    luigi.build([MockTask(ref=r, must_be_git=must_be_git, storage_override=path if path is not None else '') for r in ref], workers=_workers, local_scheduler=local_scheduler)
-
-#################################
-# CLI: RUN
+# CLI: run
 #################################
 @main.command(name="run")
 @click.argument('ref', nargs=-1)
@@ -100,54 +71,154 @@ def entry_point_mock(ref: list[str], path: Optional[str], must_be_git: bool, loc
     default=False,
     help="If global-scheduler is set (default), the global scheduler will be used. If local scheduler is set, a local scheduler will be used (beware of conflicting runs)."
     )
-def entry_point_run(ref: list[str], workers: Optional[int], must_be_git: bool, local_scheduler: bool):
+@click.option(
+    '--mock',
+    is_flag=True,
+    help="""
+    Don't actually run the task, but pretend to run it and mark it as done (Does not run dependencies).
+    Useful for tasks that have been run outside of trustpipe.
+    """
+    )
+@click.option(
+    '--storage-override',
+    type=str,
+    required=False,
+    help="""
+    Location to use as output directory of REF. Will fail if multiple refs are supplied, and will not apply to dependencies.
+    Useful in combination with --mock to make existing data part of trustpipe.
+    """,
+)
+def entry_point_run(ref: list[str], workers: Optional[int], must_be_git: bool, local_scheduler: bool, mock: bool, storage_override: Optional[str]):
     """Run REF(s).
     
     REF is a github reference of the form: git@github.com:REPO.git#BRANCH:PATH (or a local path for testing purposes).
     """
+    
+    # if storage-override we can only have one ref.
+    assert (storage_override is None) or len(ref) == 1, "We can only mock one ref if path is given"
     _workers = len(ref) if workers is None else workers
-    luigi.build([RunTask(ref=r, must_be_git=must_be_git) for r in ref], workers=_workers, local_scheduler=local_scheduler)
+    TaskType = MockTask if mock else RunTask
+    luigi.build([TaskType(ref=r, must_be_git=must_be_git, storage_override=storage_override) for r in ref], workers=_workers, local_scheduler=local_scheduler)
 
+#####################
+# CLI: ls
+#####################
 
+class JQFilter(object):
+    def __init__(self, jq_filter, **kwargs):
+        self.filter = jq.compile(jq_filter, **kwargs)
 
-#################################
-# CLI: LIST
-#################################
+    def __call__(self, entries):
+        for entry in entries:
+            match self.filter.input_text(entry.content).all():
+                case [True]:
+                    yield entry
+                case [False]:
+                    pass
+                case x:
+                    xstr = str(x)
+                    if len(xstr) > 30:
+                        xstr = xstr[:27] + '...'
+                    raise ValueError(f"Result of jq filter must be a single boolean, not: {xstr}")
 
-@main.command(name="list")
+    @classmethod
+    def make(cls, kind, selector, value):
+        match kind:
+            case 'eq':
+                return cls(f'{selector}==$value', args={'value': value})
+            case 're':
+                return cls(f'{selector} | test($value)', args={'value': value})
+            case _:
+                raise ValueError(f'kind must be one of "eq", "re", not {kind}')
+
+@dataclass
+class Entry:
+    path: str
+    content: str
+
+    @classmethod
+    def from_de(cls, de):
+        path = de.path
+        with open(de, 'rt') as handle:
+            content = handle.read()
+        return cls(str((pathlib.Path() / path).absolute()), content)
+
+@main.group(name='ls', chain=True, invoke_without_command=True)
 @click.option(
-    "--jq_filter",
-    type=str,
-    required=False,
-    help="filter json files using jq filter, e.g. \'.spec.kind = \"process\"\'",
-)
+        '--data/--repo', 
+        default=True,
+        help='List metadata about DataTasks (data) or PullTask (repo)'
+        )
 @click.option(
-    "--kind",
-    type=str,
-    required=False,
-    help="filter json files by kind, e.g. process",
-)
+        '--done', 'status', 
+        flag_value='.done', default=True, 
+        help='Only list items with status DONE'
+        )
 @click.option(
-    "--name",
-    type=str,
-    required=False,
-    help="filter json files by name, e.g. litteraturbanken",
-)
-def entry_point_list(jq_filter: Optional[str], kind: Optional[str], name: Optional[str]) -> None:
-    """LIST COMPLETED TASKS. USE OPTIONS BELOW TO FILTER JSON FILES."""
-    # parse input arguments and create JsonFilter instance
-    jq_filters = []
-    if jq_filter is not None:
-        jq_filters.append(jq_filter)
-    if kind is not None:
-        jq_filters.append(f".spec.kind == \"{kind}\"")
-    if name is not None:
-        jq_filters.append(f".spec.name == \"{name}\"")
-    json_filter = JsonFilter(jq_filters) if len(jq_filters) else None
+        '--failed', 'status', 
+        flag_value='.done | not',
+        help='Only list items with status FAILED'
+        )
+@click.option(
+        '--all', 'status', 
+        flag_value='true',
+        help='List all items'
+        )
+@click.option(
+        '--meta/--storage',
+        default=True,
+        help='Show metadata location (default) or show storage location'
+        )
+def cli_ls(data, status, meta):
+    """List data task in catalog. Use subcommands to filter results"""
+    pass
 
-    # apply JsonFilter instance and print list of docs
-    entries = os.scandir(DataTarget.catalog_root())
-    for de in entries:
-        doc = open(de).read()
-        if json_filter is None or json_filter.apply(doc):
-            print(de.path)
+@cli_ls.result_callback()
+def ls_pipeline(processors, data, status, meta):
+    if data:
+        ROOT = DataTarget.catalog_root()
+    else:
+        ROOT = RepoTarget.catalog_root()
+
+    entries = map(Entry.from_de, os.scandir(ROOT))
+
+    for processor in (JQFilter(status), *processors):
+        entries = processor(entries)
+
+    entries = list(entries)
+
+    for entry in entries:
+        if meta:
+            click.echo(entry.path)
+        else:
+            click.echo(json.loads(entry.content)['storage'])
+
+@cli_ls.command('filter')
+@click.argument('jq_filter')
+def cli_ls_jq(jq_filter: str):
+    """Filter based on JQ_FILTER (see jq manual for info)"""
+    return JQFilter(jq_filter)
+
+@cli_ls.command('ref')
+@click.argument('ref')
+@click.option('--regex/--exact', default=False, help='use exact matching or regex')
+def cli_ls_ref(ref: str, regex: bool):
+    """Filter based on task REF"""
+    typ = 're' if regex else 'eq'
+    return JQFilter.make(typ, '.args.ref', ref)
+
+@cli_ls.command('kind')
+@click.argument('kind')
+@click.option('--regex/--exact', default=False, help='use exact matching or regex')
+def cli_ls_kind(kind: str, regex: bool):
+    """Filter based on task KIND"""
+    typ = 're' if regex else 'eq'
+    return JQFilter.make(typ, '.spec.kind', kind)
+
+@cli_ls.command('name')
+@click.argument('name')
+@click.option('--regex/--exact', default=False, help='use exact matching or regex')
+def cli_ls_name(name: str, regex: bool):
+    """Filter based on task NAME"""
+    typ = 're' if regex else 'eq'
+    return JQFilter.make(typ, '.spec.name', name)

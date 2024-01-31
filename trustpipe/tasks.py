@@ -6,6 +6,7 @@ import pathlib
 import tempfile
 import shutil
 
+from collections import OrderedDict
 from contextlib import contextmanager
 from dataclasses import dataclass, field, asdict, MISSING
 
@@ -35,7 +36,7 @@ class RepoSpec:
     ref: str = MISSING
     
     def to_task(self):
-        return RunTask(ref=self.ref, must_be_git=True)
+        return RunTask(ref=self.ref, must_be_git=True, storage_override=None)
 
 @dataclass
 class TaskSpec:
@@ -112,7 +113,7 @@ class repostore(luigi.Config):
 
 class PullTask(luigi.Task):
     ref = luigi.Parameter()
-    must_be_git = luigi.Parameter(default=False, visibility=ParameterVisibility.HIDDEN)
+    must_be_git = luigi.BoolParameter(default=False, visibility=ParameterVisibility.HIDDEN)
     
     def __init__(self, *args, **kwargs):
         '''
@@ -182,7 +183,7 @@ class datastore(luigi.Config):
 
 @requires(PullTask)
 class DataTask(luigi.Task):
-    storage_override = luigi.Parameter(default='', visibility=ParameterVisibility.HIDDEN)
+    storage_override = luigi.OptionalParameter(visibility=ParameterVisibility.HIDDEN)
     def __init__(self, *args, **kwargs):
         '''
         When a new instance of the IngestTask class gets created:
@@ -192,7 +193,7 @@ class DataTask(luigi.Task):
         '''
         super().__init__(*args, **kwargs)
         self._logger = logger
-        self._cleanups = []
+        self._cleanups = OrderedDict()
         set_from_ref(self, self.ref)
 
     @property
@@ -200,7 +201,7 @@ class DataTask(luigi.Task):
         return f'{self.slug}_{self.hash}'
 
     def storage(self, spec, absolute=True):
-        if self.storage_override:
+        if self.storage_override is not None:
             path = pathlib.Path() / self.storage_override
         
         else:
@@ -215,10 +216,11 @@ class DataTask(luigi.Task):
         return DataTarget.make(f'{self.basename}.json')
 
     def add_cleanup(self, name, function):
-        self._cleanups.append((name, function))
+        self._cleanups[name] = function
     
     def on_success(self):
-        for name, fun in self._cleanups:
+        while self._cleanups:
+            name, fun = self._cleanups.popitem(last=False)
             self._logger.info(f'cleanup [{name}] ....')
             fun()
             self._logger.info(f'cleanup [{name}] DONE')
