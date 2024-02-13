@@ -6,4 +6,4 @@ ENTRYPOINT [\
     "--continue",\
     "--no-verbose",\
     "--directory-prefix=/output",\
-    "--input-file=/sources.txt"]
+    "--input-file=/urls.txt"]
