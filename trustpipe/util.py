@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from contextlib import contextmanager
 
 import git
+import docker
 
 from slugify import slugify
 
@@ -64,9 +65,9 @@ def build_image(path, client, logger):
         for log in logs:
             logger.info(json.dumps(log))
     except docker.errors.APIError as e:
-        logger.warning('docker API error during build: ' + e.explanation)
+        logger.warning('docker API error during build: ' + e)
         raise e
     except docker.errors.BuildError as e:
-        logger.warning('docker build error during build: ' + e.explanation)
+        logger.warning('docker build error during build: ' + e)
         raise e
     return img
