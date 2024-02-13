@@ -268,6 +268,7 @@ class RunTask(DataTask):
             img = repo.build_image(self._client, logger)
             log['image'] = img.id
             log['binds'] = binds
+            log['logs'] = []
             self._logger.info(json.dumps(log))
             #TODO: Add possibility to mount cache volumes? or other kinds of volumes? (Is it needed?)
             logs = self._client.containers.run(
@@ -280,9 +281,11 @@ class RunTask(DataTask):
             )
 
             self.add_cleanup('container', mk_container_cleanup(self))
-        
+         
             for item in logs:
-                self._logger.info(item.decode('utf-8').rstrip())
+                item = item.decode('utf-8').rstrip()
+                log['logs'].append(item)
+                self._logger.info(item)
 
 
 class MockTask(DataTask):

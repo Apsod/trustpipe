@@ -1,0 +1,5 @@
+name: gutenberg
+kind: process
+depends_on:
+  input: 
+    ref: git@github.com:apsod/trustpipe.git#features:example/ingest
