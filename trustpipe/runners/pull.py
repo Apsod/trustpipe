@@ -2,7 +2,7 @@ import re
 import pathlib
 import tempfile
 from dataclasses import dataclass
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 
 import git
 
@@ -40,15 +40,16 @@ class Reference(object):
             self.path = str((pathlib.Path() / ref).absolute())
 
     @contextmanager
-    def mk_context(self):
-        ctxman = self.mk_git_context if self.is_git else self.mk_local_context
-        with ctxman() as ctx:
+    def mk_context(self, tmpdir=None):
+        ctxman = self.mk_git_context(tmpdir) if self.is_git else self.mk_local_context()
+        with ctxman as ctx:
             yield ctx
 
     @contextmanager
-    def mk_git_context(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = pathlib.Path() / tmpdir / 'stuff'
+    def mk_git_context(self, tmpdir):
+        ctxman = nullcontext(tmpdir) if tmpdir else tempfile.TemporaryDirectory()
+        with ctxman as dir:
+            root = pathlib.Path() / dir / 'stuff'
             sha = clone_subpath(self.repo, self.path, str(root), self.branch)
             subdir = str(root / self.path)
             yield contextdata(subdir, sha)
