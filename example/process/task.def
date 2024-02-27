@@ -1,0 +1,14 @@
+Bootstrap: docker
+From: ubuntu:22.04
+
+%files
+    process.py /process.py
+    process.sh /process.sh
+
+%post
+    apt-get update
+    apt-get install -y pandoc jq parallel pip python
+    pip install pypandoc
+
+%runscript
+    /process.sh

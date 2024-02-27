@@ -18,7 +18,6 @@ logger = logging.getLogger('luigi-interface')
 class catalog(luigi.Config):
     root = luigi.Parameter()
 
-
 """
 This is a convenience wrapper around a filesystem target (fs_target)
 it shares the same existance criteria as the fs_target, but adds
@@ -54,6 +53,7 @@ class CatalogTarget(luigi.Target):
 
     @classmethod
     def make(cls, path, **kwargs):
+        cls.catalog_root().mkdir(parents=True, exist_ok=True)
         final_path = str(cls.catalog_root() / path)
         fs_target = luigi.LocalTarget(final_path, **kwargs)
         log_path = str(cls.catalog_root() / f'log.{path}')
@@ -96,4 +96,3 @@ class CatalogTarget(luigi.Target):
 
     def exists(self):
         return self.fs_target.exists()
-

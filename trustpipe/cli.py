@@ -7,7 +7,7 @@ import json
 from typing import Optional, List
 from dataclasses import dataclass
 
-from trustpipe import DataTarget, RunTask, MockTask, RepoTarget
+from trustpipe import DataTarget, RunTask, MockTask
 
 import jq
 import luigi
@@ -62,11 +62,6 @@ def main() -> None:
     required=False,
     help="Numbers of concurrent tasks to run. Defaults to the number of REFs supplied.")
 @click.option(
-    '--must-be-git/--can-be-other', 
-    default=True,
-    help="If must-be-git is set (default), the references supplied must be references to git repos. Otherwise (--can-be-other), file paths can be used as references.",
-    )
-@click.option(
     '--local-scheduler/--global-scheduler', 
     default=False,
     help="If global-scheduler is set (default), the global scheduler will be used. If local scheduler is set, a local scheduler will be used (beware of conflicting runs)."
@@ -88,7 +83,7 @@ def main() -> None:
     Useful in combination with --mock to make existing data part of trustpipe.
     """,
 )
-def entry_point_run(ref: list[str], workers: Optional[int], must_be_git: bool, local_scheduler: bool, mock: bool, storage_override: Optional[str]):
+def entry_point_run(ref: list[str], workers: Optional[int], local_scheduler: bool, mock: bool, storage_override: Optional[str]):
     """Run REF(s).
     
     REF is a github reference of the form: git@github.com:REPO.git#BRANCH:PATH (or a local path for testing purposes).
@@ -98,7 +93,7 @@ def entry_point_run(ref: list[str], workers: Optional[int], must_be_git: bool, l
     assert (storage_override is None) or len(ref) == 1, "We can only mock one ref if path is given"
     _workers = len(ref) if workers is None else workers
     TaskType = MockTask if mock else RunTask
-    luigi.build([TaskType(ref=r, must_be_git=must_be_git, storage_override=storage_override) for r in ref], workers=_workers, local_scheduler=local_scheduler)
+    luigi.build([TaskType(reference=r, storage_override=storage_override) for r in ref], workers=_workers, local_scheduler=local_scheduler)
 
 #####################
 # CLI: ls
@@ -145,11 +140,6 @@ class Entry:
 
 @main.group(name='ls', chain=True, invoke_without_command=True)
 @click.option(
-        '--data/--repo', 
-        default=True,
-        help='List metadata about DataTasks (data) or PullTask (repo)'
-        )
-@click.option(
         '--done', 'status', 
         flag_value='.done', default=True, 
         help='Only list items with status DONE'
@@ -169,16 +159,13 @@ class Entry:
         default=True,
         help='Show metadata location (default) or show storage location'
         )
-def cli_ls(data, status, meta):
+def cli_ls(status, meta):
     """List data task in catalog. Use subcommands to filter results"""
     pass
 
 @cli_ls.result_callback()
-def ls_pipeline(processors, data, status, meta):
-    if data:
-        ROOT = DataTarget.catalog_root()
-    else:
-        ROOT = RepoTarget.catalog_root()
+def ls_pipeline(processors, status, meta):
+    ROOT = DataTarget.catalog_root()
 
     entries = map(Entry.from_de, os.scandir(ROOT))
 

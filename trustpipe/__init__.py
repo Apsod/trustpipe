@@ -1,2 +1,2 @@
-from .tasks import RunTask, MockTask, PullTask, DataTarget, RepoTarget
+from .tasks import RunTask, MockTask, DataTarget
 from .target import CatalogTarget
