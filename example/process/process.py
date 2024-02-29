@@ -4,7 +4,7 @@ import itertools
 import sys
 import os
 import gzip
-from multiprocessing import Pool, Queue
+from multiprocessing import Process, Queue
 
 import pypandoc
 
@@ -45,7 +45,9 @@ def reader(root, queue):
     for de in os.scandir(root):
         if de.name.endswith('epub.noimages'):
             with open(de, 'rb') as handle:
-                queue.put(handle.read())
+                data = handle.read()
+                if data:
+                    queue.put(data)
 
 def worker(in_queue, out_queue):
     while (data := in_queue.get()):
@@ -53,7 +55,7 @@ def worker(in_queue, out_queue):
     
 
 def writer(dest, in_queue):
-    with gzip.open(dest, 'w') as out:
+    with gzip.open(dest, 'wt') as out:
         while (data := in_queue.get()):
             out.write(data)
             out.write('\n')
