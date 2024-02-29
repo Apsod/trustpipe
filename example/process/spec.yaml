@@ -1,5 +1,8 @@
 name: gutenberg
 kind: process
+modalities: text
+description:
+    This process script takes ingested project gutenberg epubs and transforms them to text using pandoc. The resulting text (and metadata) is put into a gzipped jsonlines document.
 depends_on:
   input: 
     ref: git@github.com:apsod/trustpipe.git#singularity:example/ingest

@@ -1,15 +1,14 @@
 Bootstrap: docker
-From: python:3.12.2
+From: python:3.12
 
 %files
     process.py /process.py
-    process.sh /process.sh
 
 %post
     apt-get update
-    apt-get install -y pandoc jq parallel
+    apt-get install -y pandoc
     pip install pypandoc
 
 %runscript
     cd /
-    ./process.sh
+    python process.py /input /output/gutenberg.gz

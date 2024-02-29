@@ -1,2 +1,7 @@
 name: gutenberg
 kind: ingest
+modalities: text
+description: > 
+    This asset downloads files as specified by `url.txt` from project gutenberg.
+
+    The list was extracted from the project gutenberg catalog.
