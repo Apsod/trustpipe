@@ -2,14 +2,18 @@ import re
 import pathlib
 import tempfile
 import shutil
+import logging
 from dataclasses import dataclass
 from contextlib import contextmanager, nullcontext
 
 from trustpipe.util import slug, hashdigest
 
+import luigi
 import git
 
-gitpattern = re.compile(r'(?P<repo>git@.*:.*.git)#(?P<branch>.*):(?P<path>.*)')
+logger = logging.getLogger(f'luigi-interface.{__name__}')
+
+gitpattern = re.compile(r'(?P<loc>.*):(?P<repo>.*.git)#(?P<branch>.*):(?P<path>.*)')
 
 def clone_subpath(url, subpath, dst, branch=None):
     OPTIONS = ['-n', '--depth=1', '--no-checkout', '--filter=tree:0']
@@ -26,6 +30,9 @@ def clone_subpath(url, subpath, dst, branch=None):
     repo.git.checkout()
     return repo.rev_parse('HEAD').hexsha
 
+class gitconfig(luigi.Config):
+    pat = luigi.Parameter(default='', visibility=luigi.parameter.ParameterVisibility.PRIVATE)
+
 @dataclass
 class contextdata:
     path: str
@@ -36,10 +43,11 @@ class Reference(object):
     def __init__(self, ref):
         if (m := gitpattern.match(ref)):
             self.is_git = True
+            self.loc = m.group('loc')
             self.repo = m.group('repo')
             self.branch = m.group('branch')
             self.path = m.group('path')
-            spec = (self.repo, self.branch, self.path)
+            spec = (self.loc, self.repo, self.branch, self.path)
         else:
             self.is_git = False
 
@@ -52,6 +60,16 @@ class Reference(object):
         self.slug = slug(*spec)
         self.hash = hashdigest(*spec)
 
+    def mk_git_url(self):
+        conf = gitconfig()
+
+        if conf.pat:
+            url = f'https://{conf.pat}@{self.loc}/{self.repo}'
+        else:
+            url = f'git@{self.loc}:{self.repo}'
+        return url
+
+
 
     @contextmanager
     def mk_context(self, tmpdir=None):
@@ -62,9 +80,10 @@ class Reference(object):
     @contextmanager
     def mk_git_context(self, tmpdir):
         ctxman = nullcontext(tmpdir) if tmpdir else tempfile.TemporaryDirectory(prefix='trustpipe-git')
+        git_url = self.mk_git_url()
         with ctxman as dir:
             root = pathlib.Path() / dir / 'stuff'
-            sha = clone_subpath(self.repo, self.path, str(root), self.branch)
+            sha = clone_subpath(git_url, self.path, str(root), self.branch)
             subdir = str(root / self.path)
             yield contextdata(subdir, sha, 'git')
 
