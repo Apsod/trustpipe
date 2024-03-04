@@ -53,6 +53,7 @@ class TaskSpec:
     author_name: str = ""
     author_email: str = ""
     output: str = '/output'
+    wrapper: bool = False
     persist: bool = True
     depends_on: dict[str, DependencySpec] = field(default_factory=dict)
 
@@ -127,27 +128,39 @@ class RunTask(BaseTask):
             names = spec.depends_on.keys()
             logger.info('figuring out dependencies')
             trgs = yield [RunTask(reference=spec.depends_on[name].ref, storage_override=None) for name in names]
-            
-            storage = str(self.storage())
 
-            binds = [to_bind(storage, spec.output)]
+            if spec.wrapper:
+                #Wrapper tasks do no work themselves
 
-            for name, trg in zip(names, trgs):
-                dst = spec.depends_on[name].at
-                dst = dst if dst else f'/{name}'
+                META = dict(
+                        task = self.get_task_family(),
+                        args = self.to_str_params(),
+                        spec = asdict(spec),
+                        sha = ctx.sha,
+                )
+                with self.output().catalogize(**META) as log:
+                    pass
+            else:
+                storage = str(self.storage())
 
-                binds.append(to_bind(trg.path(), dst, read_only=True))
-            
-            META = dict(
-                    task = self.get_task_family(),
-                    storage = storage,
-                    args = self.to_str_params(),
-                    spec = asdict(spec),
-                    sha = ctx.sha,
-            )
+                binds = [to_bind(storage, spec.output)]
 
-            with self.output().catalogize(**META) as log:
-                self.runner.run_and_build(ctx, binds)
+                for name, trg in zip(names, trgs):
+                    dst = spec.depends_on[name].at
+                    dst = dst if dst else f'/{name}'
+
+                    binds.append(to_bind(trg.path(), dst, read_only=True))
+                
+                META = dict(
+                        task = self.get_task_family(),
+                        storage = storage,
+                        args = self.to_str_params(),
+                        spec = asdict(spec),
+                        sha = ctx.sha,
+                )
+
+                with self.output().catalogize(**META) as log:
+                    self.runner.run_and_build(ctx, binds)
 
 class MockTask(BaseTask):
     pull = luigi.BoolParameter()
