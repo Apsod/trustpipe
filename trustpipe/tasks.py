@@ -5,6 +5,7 @@ import os
 import pathlib
 import tempfile
 import shutil
+import configparser
 
 from collections import OrderedDict
 from contextlib import contextmanager, nullcontext
@@ -27,6 +28,12 @@ from trustpipe.pull import Reference
 
 logger = logging.getLogger('luigi-interface')
 
+def get_trustpipe_variable(key):
+    try:
+        var = luigi.configuration.get_config().get('variables', key)
+        return var
+    except configparser.NoOptionError as e:
+        logger.error(f'No variable with key "{key}" found, have you added it to the config?')
     
 def to_bind(host_path, container_path, read_only=False):
     parts = [host_path, container_path]
@@ -34,12 +41,10 @@ def to_bind(host_path, container_path, read_only=False):
         parts.append('ro')
     return ':'.join(parts)
 
-
 @dataclass
 class DependencySpec:
     ref: str = MISSING
     at: str = ""
-
 
 @dataclass
 class TaskSpec:
@@ -49,12 +54,16 @@ class TaskSpec:
     modalities: str = ""
     description: str = ""
     data_source: str = ""
+    pii: str = ""
+    ipr: str = ""
+    license: str = ""
     copyright: str = ""
     author_name: str = ""
     author_email: str = ""
     output: str = '/output'
     wrapper: bool = False
     persist: bool = True
+    variables: list[str] = field(default_factory=list)
     depends_on: dict[str, DependencySpec] = field(default_factory=dict)
 
     @classmethod
@@ -80,6 +89,7 @@ class logstore(luigi.Config):
 
 class datastore(luigi.Config):
     store = luigi.Parameter()
+
 
 class BaseTask(luigi.Task):
     storage_override = luigi.OptionalStrParameter(visibility=ParameterVisibility.HIDDEN)
@@ -118,7 +128,6 @@ class BaseTask(luigi.Task):
 
         return path
 
-
     def output(self):
         return DataTarget.make(f'{self.basename}.json')
 
@@ -147,7 +156,9 @@ class RunTask(BaseTask):
             spec = TaskSpec.read(pathlib.Path() / ctx.path / 'spec.yaml')
             
             names = spec.depends_on.keys()
-            self.logger.info('figuring out dependencies')
+            self.logger.info('Figuring out environment variables')
+            variables = {key: get_trustpipe_variable(key) for key in spec.variables}
+            self.logger.info('Figuring out dependencies')
             trgs = yield [RunTask(reference=spec.depends_on[name].ref, storage_override=None) for name in names]
 
             if spec.wrapper:
@@ -181,7 +192,7 @@ class RunTask(BaseTask):
                 )
 
                 with self.output().catalogize(**META) as log:
-                    self.runner.run_and_build(ctx, binds)
+                    self.runner.run_and_build(ctx, binds, variables)
 
 class MockTask(BaseTask):
     pull = luigi.BoolParameter()

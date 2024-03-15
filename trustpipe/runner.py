@@ -36,14 +36,14 @@ class Runner(object):
         pass
     
     @contextmanager
-    def run(self, image, binds):
+    def run(self, image, binds, variables):
         pass
 
-    def run_and_build(self, ctx, binds):
+    def run_and_build(self, ctx, binds, variables):
         self.logger.info('starting build')
         with self.build(ctx) as img:
             self.logger.info('starting run')
-            self.run(img, binds)
+            self.run(img, binds, variables)
             self.logger.info('finished run')
         self.logger.info('finished build and run')
 
@@ -62,8 +62,19 @@ class ApptainerRunner(Runner):
                 execute([self.cmd, 'build', dest, 'task.def'])
             yield dest
 
-    def run(self, image, binds):
-        execute([self.cmd, 'run', *[f'-B={bind}' for bind in binds], image], self.logger)
+    def run(self, image, binds, variables):
+        if variables:
+            env_args = ['--env', ','.join([f'{key}={val}' for key, val in variables.items()])]
+        else:
+            env_args = []
+
+        execute([
+            self.cmd, 'run', 
+            *[f'-B={bind}' for bind in binds], 
+            *env_args,
+            image,
+            ],
+            self.logger)
 
 
 class DockerRunner(Runner):
@@ -90,10 +101,11 @@ class DockerRunner(Runner):
         #logger.info('removing image')
         #img.remove()
     
-    def run(self, image, binds):
+    def run(self, image, binds, variables):
         container = self.client.containers.run(
                 image,
                 volumes=binds,
+                environment=variables,
                 detach=True,
                 )
         
