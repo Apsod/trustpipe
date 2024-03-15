@@ -8,7 +8,7 @@ from contextlib import chdir, contextmanager
 
 logger = logging.getLogger(f'luigi-interface.{__name__}')
 
-def execute(cmd, **kwargs):
+def execute(cmd, logger, **kwargs):
     logger.info(f'running: {cmd}')
     popen = subprocess.Popen(
             cmd,
@@ -28,8 +28,8 @@ def execute(cmd, **kwargs):
     logger.info(f'finished: {cmd}')
 
 class Runner(object):
-    def __init__(self):
-        pass
+    def __init__(self, logger):
+        self.logger = logger
     
     @contextmanager
     def build(self, ctx):
@@ -40,16 +40,17 @@ class Runner(object):
         pass
 
     def run_and_build(self, ctx, binds):
-        logger.info('starting build')
+        self.logger.info('starting build')
         with self.build(ctx) as img:
-            logger.info('starting run')
+            self.logger.info('starting run')
             self.run(img, binds)
-            logger.info('finished run')
-        logger.info('finished build and run')
+            self.logger.info('finished run')
+        self.logger.info('finished build and run')
 
 
 class ApptainerRunner(Runner):
-    def __init__(self):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.cmd = shutil.which('apptainer')
     
     @contextmanager
@@ -62,30 +63,32 @@ class ApptainerRunner(Runner):
             yield dest
 
     def run(self, image, binds):
-        execute([self.cmd, 'run', *[f'-B={bind}' for bind in binds], image])
+        execute([self.cmd, 'run', *[f'-B={bind}' for bind in binds], image], self.logger)
 
 
 class DockerRunner(Runner):
-    def __init__(self):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         import docker
         self.client = docker.client.from_env()
     
     @contextmanager
     def build(self, ctx):
+        import docker
         path = (pathlib.Path() / ctx.path).absolute()
         try:
             img, logs = self.client.images.build(path=str(path))
             for log in logs:
-                logger.info(json.dumps(log))
+                self.logger.info(json.dumps(log))
         except docker.errors.APIError as e:
-            logger.warning('docker API error during build: ' + e)
+            self.logger.warning('docker API error during build: ' + e)
             raise e
         except docker.errors.BuildError as e:
-            logger.warning('docker build error during build: ' + e)
+            self.logger.warning('docker build error during build: ' + e)
             raise e
         yield img
-        logger.info('removing image')
-        img.remove()
+        #logger.info('removing image')
+        #img.remove()
     
     def run(self, image, binds):
         container = self.client.containers.run(
@@ -96,7 +99,7 @@ class DockerRunner(Runner):
         
         for l in container.logs(stream=True, since=1):
             l = l.decode('utf-8').strip()
-            logger.info(l)
+            self.logger.info(l)
         
-        logger.info('removing container')
-        container.remove()
+        #logger.info('removing container')
+        #container.remove()

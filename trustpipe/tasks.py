@@ -75,6 +75,9 @@ class DataTarget(CatalogTarget):
     def path(self):
         return self.get('storage')
 
+class logstore(luigi.Config):
+    store = luigi.Parameter()
+
 class datastore(luigi.Config):
     store = luigi.Parameter()
 
@@ -104,6 +107,18 @@ class BaseTask(luigi.Task):
 
         return path
 
+    def logfile(self, absolute=True, make=True):
+        path = pathlib.Path() / logstore().store / f'{self.basename}.log'
+
+        if absolute:
+            path = path.absolute()
+        
+        if make:
+            path.parent.mkdir(parents=True, exist_ok=True)
+
+        return path
+
+
     def output(self):
         return DataTarget.make(f'{self.basename}.json')
 
@@ -117,16 +132,22 @@ class RunTask(BaseTask):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.runner = RUNNERDICT.get(self.runner_type)()
+        self.logger = logging.getLogger(f'luigi-interface.{self.basename}')
+
+        filehandler = logging.FileHandler(self.logfile())
+        filehandler.setLevel(self.logger.level)
+
+        self.logger.addHandler(filehandler)
+        self.runner = RUNNERDICT.get(self.runner_type)(self.logger)
 
     def run(self):
-        logger.info('making build context')
+        self.logger.info('making build context')
         with self.ref.mk_context() as ctx:
-            logger.info(ctx.path)
+            self.logger.info(ctx.path)
             spec = TaskSpec.read(pathlib.Path() / ctx.path / 'spec.yaml')
             
             names = spec.depends_on.keys()
-            logger.info('figuring out dependencies')
+            self.logger.info('figuring out dependencies')
             trgs = yield [RunTask(reference=spec.depends_on[name].ref, storage_override=None) for name in names]
 
             if spec.wrapper:
